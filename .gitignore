@@ -6,6 +6,14 @@ node_modules/
 dist/
 coverage/
 
+# Runtime data (keep only .gitkeep)
+data/**
+!data/.gitkeep
+!data/history/
+!data/history/.gitkeep
+!data/uploads/
+!data/uploads/.gitkeep
+
 # Env
 .env
 .env.*

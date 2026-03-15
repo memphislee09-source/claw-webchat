@@ -8,11 +8,11 @@
 - [ ] 确认最终技术实施方案
 
 ## Milestone 1：服务端最小闭环
-- [ ] 建立 `openclaw-webchat` 独立命名空间与路由
-- [ ] 完成 `agentId -> session` 绑定逻辑
-- [ ] 建立自有历史存储（JSONL）
-- [ ] 支持 `/new` 分隔标记写入
-- [ ] 完成消息净化（仅保留可展示消息）
+- [x] 建立 `openclaw-webchat` 独立命名空间与路由
+- [x] 完成 `agentId -> session` 绑定逻辑
+- [x] 建立自有历史存储（JSONL）
+- [x] 支持 `/new` 分隔标记写入
+- [x] 完成消息净化（仅保留可展示消息）
 
 ## Milestone 2：前端 MVP
 - [ ] 左侧 agent 列表（头像跨两行 + 名字 + 摘要 + 状态）
