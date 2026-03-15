@@ -48,9 +48,11 @@ async function checkPageShell() {
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
   assert(appJs.includes('function formatPresenceLabel'), 'app.js should include sidebar presence label formatting');
   assert(appJs.includes('function renderMarkdownBlock'), 'app.js should include markdown bubble rendering');
+  assert(appJs.includes("bubble.classList.add('visual-media-bubble')"), 'app.js should include responsive visual media bubble branch');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
+  assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
   assert(css.includes('.pending-upload'), 'styles.css should include pending upload styles');
   assert(css.includes('.settings-panel'), 'styles.css should include settings panel styles');
   assert(css.includes('.settings-accordion'), 'styles.css should include accordion settings layout styles');

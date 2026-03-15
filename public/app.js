@@ -141,6 +141,7 @@ function bindEvents() {
 
   window.addEventListener('resize', () => {
     if (window.innerWidth > 900) toggleSidebar(false);
+    syncAllVisualBubbleWidths();
   });
   window.addEventListener('keydown', handleWindowKeydown);
 }
@@ -324,15 +325,29 @@ function renderMessages() {
       else mediaBlocks.push(block);
     }
 
-    for (const block of textBlocks) {
-      bubble.append(renderMarkdownBlock(block.text || ''));
+    const hasVisualMediaBlock = mediaBlocks.some((block) => block.type === 'image' || block.type === 'video');
+    if (hasVisualMediaBlock) {
+      row.classList.add('visual-media-row');
+      bubble.classList.add('visual-media-bubble');
+    }
+
+    if (textBlocks.length) {
+      const textWrap = document.createElement('div');
+      textWrap.className = 'message-text-stack';
+      for (const block of textBlocks) {
+        textWrap.append(renderMarkdownBlock(block.text || ''));
+      }
+      bubble.append(textWrap);
     }
 
     if (mediaBlocks.length) {
       const mediaWrap = document.createElement('div');
       mediaWrap.className = 'message-media';
+      if (hasVisualMediaBlock) {
+        mediaWrap.classList.add('visual-media');
+      }
       for (const block of mediaBlocks) {
-        mediaWrap.append(renderMediaBlock(block));
+        mediaWrap.append(renderMediaBlock(block, bubble));
       }
       bubble.append(mediaWrap);
     }
@@ -351,7 +366,7 @@ function renderMessages() {
   }
 }
 
-function renderMediaBlock(block) {
+function renderMediaBlock(block, bubble = null) {
   if (block.invalid) {
     return createInvalidMediaCard(block.name || block.type || '文件', block.invalidReason || '文件丢失');
   }
@@ -369,6 +384,7 @@ function renderMediaBlock(block) {
     image.alt = block.name || '图片';
     image.loading = 'lazy';
     keepMessagesPinnedOnMediaLoad(image, 'load');
+    bindVisualMediaWidth(bubble, wrapper, image, 'load');
     image.addEventListener('error', () => wrapper.replaceWith(createInvalidMediaCard(block.name || '图片', '图片加载失败')));
     wrapper.append(image);
     return wrapper;
@@ -403,6 +419,7 @@ function renderMediaBlock(block) {
     video.preload = 'metadata';
     video.src = block.url;
     keepMessagesPinnedOnMediaLoad(video, 'loadedmetadata');
+    bindVisualMediaWidth(bubble, wrapper, video, 'loadedmetadata');
     video.addEventListener('error', () => wrapper.replaceWith(createInvalidMediaCard(block.name || '视频', '视频加载失败')));
     wrapper.append(video);
     return wrapper;
@@ -478,6 +495,49 @@ function createInvalidMediaCard(titleText, reasonText) {
 
   invalid.append(title, reason);
   return invalid;
+}
+
+function bindVisualMediaWidth(bubble, wrapper, mediaElement, eventName) {
+  if (!bubble || !wrapper) return;
+
+  const applyWidth = () => {
+    requestAnimationFrame(() => {
+      syncVisualBubbleWidth(bubble);
+      requestAnimationFrame(() => syncVisualBubbleWidth(bubble));
+    });
+  };
+
+  if (mediaElement.complete || mediaElement.readyState >= 1) {
+    applyWidth();
+  }
+
+  mediaElement.addEventListener(eventName, applyWidth, { once: true });
+}
+
+function syncAllVisualBubbleWidths() {
+  document.querySelectorAll('.message-bubble.visual-media-bubble').forEach((bubble) => {
+    syncVisualBubbleWidth(bubble);
+  });
+}
+
+function syncVisualBubbleWidth(bubble) {
+  if (!bubble) return;
+  const mediaElements = Array.from(bubble.querySelectorAll('.message-image, .message-video'));
+  let width = 0;
+
+  for (const mediaElement of mediaElements) {
+    const nextWidth = Math.round(mediaElement.getBoundingClientRect().width);
+    if (nextWidth > width) width = nextWidth;
+  }
+
+  if (width <= 0) return;
+
+  bubble.dataset.mediaMeasured = 'true';
+  bubble.dataset.visualMediaWidth = String(width);
+  bubble.style.setProperty('--visual-media-width', `${width}px`);
+  bubble.querySelectorAll('.message-image-button, .message-video-shell').forEach((wrapper) => {
+    wrapper.style.setProperty('--visual-media-width', `${width}px`);
+  });
 }
 
 async function loadOlderHistory() {
