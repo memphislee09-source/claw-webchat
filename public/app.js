@@ -8,7 +8,11 @@ const state = {
   loadingHistory: false,
   sending: false,
   pollingTimer: null,
-  selectedOpenPromise: null
+  selectedOpenPromise: null,
+  userProfile: {
+    displayName: '我',
+    avatarUrl: null
+  }
 };
 
 const agentListEl = document.getElementById('agentList');
@@ -33,6 +37,7 @@ boot().catch((error) => showStatus(`初始化失败：${formatError(error)}`, 'e
 async function boot() {
   bindEvents();
   autoResizeComposer();
+  await loadSettings();
   await refreshAgents({ autoOpen: true });
   startPolling();
 }
@@ -58,10 +63,22 @@ function bindEvents() {
   openSidebarButtonEl.addEventListener('click', () => toggleSidebar(true));
   closeSidebarButtonEl.addEventListener('click', () => toggleSidebar(false));
   sidebarBackdropEl.addEventListener('click', () => toggleSidebar(false));
-  settingsButtonEl.addEventListener('click', () => showStatus('设置入口已预留，Phase 4 完成。', 'info'));
+  settingsButtonEl.addEventListener('click', openSettingsQuickEditor);
   window.addEventListener('resize', () => {
     if (window.innerWidth > 900) toggleSidebar(false);
   });
+}
+
+async function loadSettings() {
+  try {
+    const payload = await apiGet('/api/openclaw-webchat/settings');
+    state.userProfile = {
+      displayName: payload?.userProfile?.displayName || '我',
+      avatarUrl: payload?.userProfile?.avatarUrl || null
+    };
+  } catch {
+    state.userProfile = { displayName: '我', avatarUrl: null };
+  }
 }
 
 async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) {
@@ -69,6 +86,7 @@ async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) 
   const data = await apiGet('/api/openclaw-webchat/agents');
   state.agents = Array.isArray(data.agents) ? data.agents : [];
   renderAgentList();
+  updateHeader();
 
   const nextAgentId = previousActive && state.agents.some((item) => item.agentId === previousActive)
     ? previousActive
@@ -80,7 +98,7 @@ async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) 
   }
 
   if (autoOpen && nextAgentId) {
-    await openAgent(nextAgentId, { forceReload: Boolean(previousActive !== nextAgentId) || !state.activeSessionKey });
+    await openAgent(nextAgentId, { forceReload: previousActive !== nextAgentId || !state.activeSessionKey });
   }
 }
 
@@ -101,19 +119,18 @@ function renderAgentList() {
     button.className = `agent-card${agent.agentId === state.activeAgentId ? ' active' : ''}`;
     button.addEventListener('click', () => openAgent(agent.agentId, { forceReload: agent.agentId !== state.activeAgentId }));
 
-    const avatar = document.createElement('div');
-    avatar.className = 'agent-avatar';
-    if (agent.avatarUrl) {
-      const image = document.createElement('img');
-      image.src = agent.avatarUrl;
-      image.alt = agent.name || agent.agentId;
-      avatar.append(image);
-    } else {
-      avatar.textContent = (agent.name || agent.agentId || '?').slice(0, 1).toUpperCase();
-    }
+    const avatar = createAvatarElement({
+      className: 'agent-avatar',
+      avatarUrl: agent.avatarUrl,
+      label: agent.name || agent.agentId,
+      fallbackText: (agent.name || agent.agentId || '?').slice(0, 1).toUpperCase()
+    });
 
-    const nameRow = document.createElement('div');
-    nameRow.className = 'agent-name-row';
+    const content = document.createElement('div');
+    content.className = 'agent-content';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'agent-top-row';
 
     const name = document.createElement('div');
     name.className = 'agent-name';
@@ -122,13 +139,13 @@ function renderAgentList() {
     const presence = document.createElement('span');
     presence.className = `presence-dot ${normalizePresence(agent.presence)}`;
 
-    nameRow.append(name, presence);
-
     const summary = document.createElement('div');
     summary.className = 'agent-summary';
     summary.textContent = agent.summary || '点击进入会话';
 
-    button.append(avatar, nameRow, summary);
+    topRow.append(name, presence);
+    content.append(topRow, summary);
+    button.append(avatar, content);
     agentListEl.append(button);
   }
 }
@@ -171,9 +188,9 @@ function renderMessages() {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.innerHTML = `
-      <div class="eyebrow">Phase 2 MVP</div>
-      <h3>已接入真实会话，但当前时间线还没有消息</h3>
-      <p class="empty-tip">左侧 agent 采用长期主时间线；输入消息后，只会展示用户消息与 assistant 最终回复。</p>
+      <div class="eyebrow">openclaw-webchat</div>
+      <h3>当前时间线还没有消息</h3>
+      <p class="empty-tip">最新消息会贴着输入框显示，旧消息向上堆叠；点击左侧 agent 会自动恢复或创建该 agent 的长期主时间线。</p>
     `;
     messageListEl.append(empty);
     return;
@@ -193,6 +210,10 @@ function renderMessages() {
 
     const row = document.createElement('div');
     row.className = `message-row ${message.role}`;
+
+    const avatar = createMessageAvatar(message.role);
+    const body = document.createElement('div');
+    body.className = 'message-body';
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
@@ -224,7 +245,8 @@ function renderMessages() {
     time.className = 'message-time';
     time.textContent = formatTime(message.createdAt);
 
-    row.append(bubble, time);
+    body.append(bubble, time);
+    row.append(avatar, body);
     messageListEl.append(row);
   }
 
@@ -294,9 +316,8 @@ async function loadOlderHistory() {
     state.nextBefore = data.nextBefore || null;
     state.hasMore = Boolean(data.hasMore);
     renderMessages();
-
     const nextHeight = messageListEl.scrollHeight;
-    messageListEl.scrollTop = nextHeight - previousHeight;
+    messageListEl.scrollTop = Math.max(0, nextHeight - previousHeight);
   } finally {
     state.loadingHistory = false;
   }
@@ -308,7 +329,6 @@ async function handleSendSubmit(event) {
 
   const text = composerInputEl.value.trim();
   if (!text) return;
-
   if (text === '/new') {
     await handleNewContext();
     return;
@@ -333,7 +353,6 @@ async function handleSendSubmit(event) {
     autoResizeComposer();
 
     const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(state.activeSessionKey)}/send`, { text });
-    state.messages[state.messages.length - 1] = optimistic;
     if (response?.message) state.messages.push(response.message);
     renderMessages();
     scrollMessagesToBottom();
@@ -382,6 +401,63 @@ function updateHeader() {
   headerPresenceEl.className = `presence-dot ${normalizePresence(active?.presence || 'idle')}`;
 }
 
+async function openSettingsQuickEditor() {
+  const currentName = state.userProfile.displayName || '我';
+  const currentAvatar = state.userProfile.avatarUrl || '';
+  const displayName = window.prompt('设置你的显示名：', currentName);
+  if (displayName === null) return;
+  const avatarUrl = window.prompt('设置你的头像 URL（留空则清除）：', currentAvatar);
+  if (avatarUrl === null) return;
+
+  try {
+    const payload = await apiPatch('/api/openclaw-webchat/settings/user-profile', {
+      displayName: displayName.trim() || '我',
+      avatarUrl: avatarUrl.trim() || null
+    });
+    state.userProfile = {
+      displayName: payload?.userProfile?.displayName || '我',
+      avatarUrl: payload?.userProfile?.avatarUrl || null
+    };
+    renderMessages();
+    showStatus('你的头像设置已保存。', 'success');
+  } catch (error) {
+    showStatus(`保存头像设置失败：${formatError(error)}`, 'error');
+  }
+}
+
+function createAvatarElement({ className, avatarUrl, label, fallbackText }) {
+  const avatar = document.createElement('div');
+  avatar.className = className;
+  if (avatarUrl) {
+    const image = document.createElement('img');
+    image.src = avatarUrl;
+    image.alt = label || fallbackText || 'avatar';
+    avatar.append(image);
+  } else {
+    avatar.textContent = fallbackText || (label || '?').slice(0, 1).toUpperCase();
+  }
+  return avatar;
+}
+
+function createMessageAvatar(role) {
+  if (role === 'user') {
+    return createAvatarElement({
+      className: 'message-avatar user',
+      avatarUrl: state.userProfile.avatarUrl,
+      label: state.userProfile.displayName || '我',
+      fallbackText: (state.userProfile.displayName || '我').slice(0, 1)
+    });
+  }
+
+  const active = state.agents.find((item) => item.agentId === state.activeAgentId) || null;
+  return createAvatarElement({
+    className: 'message-avatar assistant',
+    avatarUrl: active?.avatarUrl,
+    label: active?.name || active?.agentId || 'A',
+    fallbackText: (active?.name || active?.agentId || 'A').slice(0, 1).toUpperCase()
+  });
+}
+
 function showStatus(message, tone = 'info') {
   chatStatusEl.textContent = message || '';
   chatStatusEl.style.color = tone === 'error' ? '#fca5a5' : tone === 'success' ? '#86efac' : '';
@@ -410,7 +486,7 @@ function startPolling() {
     try {
       await refreshAgents({ autoOpen: false });
     } catch {
-      // keep silent during background poll
+      // silent background refresh
     }
   }, 10000);
 }
@@ -431,6 +507,18 @@ async function apiGet(url) {
 async function apiPost(url, body) {
   const response = await fetch(url, {
     method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json'
+    },
+    body: JSON.stringify(body || {})
+  });
+  return handleResponse(response);
+}
+
+async function apiPatch(url, body) {
+  const response = await fetch(url, {
+    method: 'PATCH',
     headers: {
       'content-type': 'application/json',
       accept: 'application/json'

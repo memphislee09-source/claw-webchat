@@ -23,6 +23,7 @@ const HISTORY_PAGE_LIMIT_MAX = 200;
 const NAMESPACE = 'openclaw-webchat';
 const BOOTSTRAP_VERSION = '2026-03-15.phase1';
 const ACTIVE_RECENT_WINDOW_MS = 5 * 60 * 1000;
+const ASSISTANT_WAIT_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_ASSISTANT_WAIT_TIMEOUT_MS || 120000);
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -174,6 +175,32 @@ app.patch('/api/openclaw-webchat/agents/:agentId/profile', (req, res) => {
   }
 });
 
+app.get('/api/openclaw-webchat/settings', (_req, res) => {
+  try {
+    const userProfile = readJson(USER_PROFILE_FILE);
+    res.json({ userProfile });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.patch('/api/openclaw-webchat/settings/user-profile', (req, res) => {
+  const displayName = normalizeOptionalString(req.body?.displayName) || '我';
+  const avatarUrl = normalizeOptionalString(req.body?.avatarUrl);
+
+  try {
+    const next = {
+      displayName,
+      avatarUrl,
+      updatedAt: new Date().toISOString()
+    };
+    writeJson(USER_PROFILE_FILE, next);
+    res.json({ ok: true, userProfile: next });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
 app.get('/api/openclaw-webchat/media', (req, res) => {
   const token = String(req.query.token || '');
   const payload = verifyMediaToken(token);
@@ -227,7 +254,7 @@ async function runUserTurn(binding, { text, inputBlocks }) {
     const assistantRaw = await waitForAssistantReply(binding.upstreamSessionKey, {
       minTimestampMs: startedAt,
       expectedUserText: upstreamMessage,
-      timeoutMs: 25000
+      timeoutMs: ASSISTANT_WAIT_TIMEOUT_MS
     });
 
     const assistantBlocks = assistantRaw ? normalizeGatewayMessageToBlocks(assistantRaw) : [];

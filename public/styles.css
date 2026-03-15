@@ -398,6 +398,7 @@ button {
 
 .loading-chip {
   align-self: flex-start;
+  margin-left: 46px;
 }
 
 .composer-wrap {
