@@ -22,6 +22,12 @@
 - [x] 完成 Phase 2 前端 MVP：左侧 agent 列表、聊天主区域、输入区、消息渲染、移动端抽屉
 - [x] 完成前端历史分页接入（无限上拉游标）
 - [x] 新增 `npm run selftest`，覆盖页面骨架、API 打通、发送消息、`/new` 与历史校验
+- [x] 按验收反馈调整右侧消息流：最新消息贴近输入框，旧消息向上堆叠
+- [x] 对话气泡增加头像：agent 左侧头像、用户右侧头像
+- [x] 左下角设置入口已接入“我的显示名 / 我的头像 URL”快速保存
+- [x] 左栏 agent 条目调整为“左侧独立头像 + 右侧上下两栏（名字 / 最新消息）”
+- [x] 增强 gateway 调用稳定性：增加断连重试与长耗时回复等待窗口
+- [x] 实测打通 `baichai` 发图链路，webchat 已可收到图片 block
 
 ## 仓库信息
 - 本地路径：`/Users/memphis/.openclaw/workspace-mira/openclaw-webchat`
