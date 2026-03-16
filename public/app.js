@@ -171,6 +171,9 @@ async function loadSettings() {
 
 async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) {
   const previousActive = state.activeAgentId;
+  const previousActiveAgent = previousActive
+    ? state.agents.find((item) => item.agentId === previousActive) || null
+    : null;
   const data = await apiGet('/api/openclaw-webchat/agents');
   state.agents = Array.isArray(data.agents) ? data.agents : [];
   renderAgentList();
@@ -186,9 +189,33 @@ async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) 
     return;
   }
 
+  const nextActiveAgent = nextAgentId
+    ? state.agents.find((item) => item.agentId === nextAgentId) || null
+    : null;
+
+  if (
+    !autoOpen
+    && previousActive
+    && nextActiveAgent
+    && shouldRefreshCurrentConversation(previousActiveAgent, nextActiveAgent)
+  ) {
+    await openAgent(previousActive, { forceReload: true, preserveScrollBottom: true });
+    return;
+  }
+
   if (autoOpen && nextAgentId) {
     await openAgent(nextAgentId, { forceReload: previousActive !== nextAgentId || !state.activeSessionKey });
   }
+}
+
+function shouldRefreshCurrentConversation(previousAgent, nextAgent) {
+  if (!previousAgent || !nextAgent) return false;
+  if (previousAgent.agentId !== nextAgent.agentId) return false;
+  if (isActiveSessionBusy()) return false;
+
+  return previousAgent.lastMessageAt !== nextAgent.lastMessageAt
+    || previousAgent.summary !== nextAgent.summary
+    || previousAgent.presence !== nextAgent.presence;
 }
 
 function renderAgentList() {
@@ -331,39 +358,47 @@ function renderMessages() {
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
 
-    const textBlocks = [];
-    const mediaBlocks = [];
-    for (const block of message.blocks || []) {
-      if (block.type === 'text') textBlocks.push(block);
-      else mediaBlocks.push(block);
-    }
-
-    const hasVisualMediaBlock = mediaBlocks.some((block) => block.type === 'image' || block.type === 'video');
+    const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+    const hasVisualMediaBlock = blocks.some((block) => block.type === 'image' || block.type === 'video');
     if (hasVisualMediaBlock) {
       row.classList.add('visual-media-row');
       bubble.classList.add('visual-media-bubble');
     }
 
-    if (textBlocks.length) {
-      const textWrap = document.createElement('div');
-      textWrap.className = 'message-text-stack';
-      for (const block of textBlocks) {
-        textWrap.append(renderMarkdownBlock(block.text || ''));
-      }
+    let textWrap = null;
+    const flushTextWrap = () => {
+      if (!textWrap || !textWrap.childNodes.length) return;
       bubble.append(textWrap);
+      textWrap = null;
+    };
+
+    for (const block of blocks) {
+      if (block.type === 'text') {
+        if (!textWrap) {
+          textWrap = document.createElement('div');
+          textWrap.className = 'message-text-stack';
+        }
+        textWrap.append(renderMarkdownBlock(block.text || ''));
+        continue;
+      }
+
+      flushTextWrap();
+
+      const mediaNode = renderMediaBlock(block, bubble);
+      if (!mediaNode) continue;
+
+      if (block.type === 'image' || block.type === 'video') {
+        const mediaWrap = document.createElement('div');
+        mediaWrap.className = 'message-media visual-media';
+        mediaWrap.append(mediaNode);
+        bubble.append(mediaWrap);
+        continue;
+      }
+
+      bubble.append(mediaNode);
     }
 
-    if (mediaBlocks.length) {
-      const mediaWrap = document.createElement('div');
-      mediaWrap.className = 'message-media';
-      if (hasVisualMediaBlock) {
-        mediaWrap.classList.add('visual-media');
-      }
-      for (const block of mediaBlocks) {
-        mediaWrap.append(renderMediaBlock(block, bubble));
-      }
-      bubble.append(mediaWrap);
-    }
+    flushTextWrap();
 
     const time = document.createElement('div');
     time.className = 'message-time';

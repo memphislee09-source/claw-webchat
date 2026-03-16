@@ -25,11 +25,13 @@ const NAMESPACE = 'openclaw-webchat';
 const BOOTSTRAP_VERSION = '2026-03-15.phase1';
 const ACTIVE_RECENT_WINDOW_MS = 5 * 60 * 1000;
 const ASSISTANT_WAIT_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_ASSISTANT_WAIT_TIMEOUT_MS || 120000);
+const ASSISTANT_LATE_REPLY_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_LATE_REPLY_TIMEOUT_MS || 10 * 60 * 1000);
 const MAX_IMAGE_UPLOAD_BYTES = Number(process.env.OPENCLAW_WEBCHAT_MAX_IMAGE_UPLOAD_BYTES || 10 * 1024 * 1024);
 const MAX_AUDIO_UPLOAD_BYTES = Number(process.env.OPENCLAW_WEBCHAT_MAX_AUDIO_UPLOAD_BYTES || 20 * 1024 * 1024);
 const WHISPER_BIN = process.env.OPENCLAW_WEBCHAT_WHISPER_BIN || 'whisper';
 const WHISPER_MODEL = process.env.OPENCLAW_WEBCHAT_WHISPER_MODEL || 'tiny';
 const WHISPER_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_WHISPER_TIMEOUT_MS || 45000);
+const lateReplyReconciliations = new Set();
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -373,7 +375,19 @@ async function runUserTurn(binding, { text, inputBlocks }) {
       };
     }
 
-    const assistantBlocks = assistantRaw ? normalizeGatewayMessageToBlocks(assistantRaw) : [];
+    if (!assistantRaw) {
+      const pendingMessage = recordAssistantTextMessage(latestBinding, '（处理中，稍后自动补回）', {
+        replyState: 'running'
+      });
+      scheduleLateAssistantReplyReconciliation(latestBinding, {
+        turnSnapshot,
+        minTimestampMs: startedAt,
+        expectedUserText: upstreamMessage
+      });
+      return { message: pendingMessage };
+    }
+
+    const assistantBlocks = normalizeGatewayMessageToBlocks(assistantRaw);
     const assistantMessage = normalizeHistoryRow({
       id: cryptoId(),
       agentId: binding.agentId,
@@ -643,6 +657,70 @@ async function runCompactSlashCommand(binding, command) {
   }
 }
 
+function scheduleLateAssistantReplyReconciliation(binding, { turnSnapshot, minTimestampMs, expectedUserText }) {
+  const key = `${binding.agentId}:${turnSnapshot.upstreamSessionKey}:${minTimestampMs}`;
+  if (lateReplyReconciliations.has(key)) return;
+  lateReplyReconciliations.add(key);
+
+  void (async () => {
+    try {
+      const assistantRaw = await waitForAssistantReply(turnSnapshot.upstreamSessionKey, {
+        minTimestampMs,
+        expectedUserText,
+        timeoutMs: ASSISTANT_LATE_REPLY_TIMEOUT_MS
+      });
+
+      const latestBinding = getBinding(binding.agentId);
+      const isCurrent = isBindingTurnCurrent(binding.agentId, turnSnapshot);
+      if (!latestBinding || !isCurrent) return;
+
+      if (!assistantRaw) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+
+      const assistantBlocks = normalizeGatewayMessageToBlocks(assistantRaw);
+      if (!assistantBlocks.length || isNoReplyOnly(assistantBlocks)) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+
+      const assistantMessage = normalizeHistoryRow({
+        id: cryptoId(),
+        agentId: binding.agentId,
+        sessionKey: binding.sessionKey,
+        role: 'assistant',
+        createdAt: assistantRaw?.createdAt || assistantRaw?.timestamp || new Date().toISOString(),
+        blocks: assistantBlocks
+      });
+
+      appendHistory(binding.agentId, binding.sessionKey, assistantMessage);
+      patchBinding(binding.agentId, {
+        replyState: 'idle',
+        lastAssistantAt: assistantMessage.createdAt,
+        lastSummary: buildMessageSummary(assistantMessage),
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      if (isBindingTurnCurrent(binding.agentId, turnSnapshot)) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+      }
+      console.error('[openclaw-webchat] late reply reconciliation failed:', formatError(error));
+    } finally {
+      lateReplyReconciliations.delete(key);
+    }
+  })();
+}
+
 function parseSlashCommand(command) {
   const trimmed = String(command || '').trim();
   if (!trimmed.startsWith('/')) return null;
@@ -665,7 +743,7 @@ function buildSlashHelpText() {
   ].join('\n');
 }
 
-function recordAssistantTextMessage(binding, text) {
+function recordAssistantTextMessage(binding, text, patch = {}) {
   const message = normalizeHistoryRow({
     id: cryptoId(),
     agentId: binding.agentId,
@@ -679,7 +757,8 @@ function recordAssistantTextMessage(binding, text) {
     replyState: 'idle',
     lastAssistantAt: message.createdAt,
     lastSummary: buildMessageSummary(message),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    ...patch
   });
   return presentHistoryEntry(message);
 }
@@ -1055,60 +1134,140 @@ function parseTextIntoBlocks(rawText) {
   const text = String(rawText || '').trim();
   if (!text) return [];
 
-  const mediaValues = [];
-  const textLines = [];
+  const blocks = [];
+  const pendingTextLines = [];
+  const flushPendingText = () => {
+    const cleanText = pendingTextLines.join('\n').trim();
+    pendingTextLines.length = 0;
+    if (cleanText) blocks.push({ type: 'text', text: cleanText });
+  };
 
   for (const originalLine of text.split('\n')) {
     const line = String(originalLine || '').trim();
-    if (!line) continue;
+    if (!line) {
+      pendingTextLines.push('');
+      continue;
+    }
 
     const unbulleted = line.replace(/^[-*•]\s*/, '').trim();
-    const mediaMatch = unbulleted.match(/^mediaUrl\s*[:：]\s*(.+)$/i);
-    if (mediaMatch?.[1]) {
-      mediaValues.push(cleanMediaValue(mediaMatch[1]));
+    const textDirective = unbulleted.match(/^text\s*[:：]\s*(.+)$/i);
+    if (textDirective?.[1]) {
+      pendingTextLines.push(textDirective[1].trim());
       continue;
     }
 
-    const mediaDirective = unbulleted.match(/^MEDIA\s*:\s*(.+)$/);
-    if (mediaDirective?.[1]) {
-      mediaValues.push(cleanMediaValue(mediaDirective[1]));
+    const directiveMedia = parseStandaloneMediaDirective(unbulleted);
+    if (directiveMedia) {
+      flushPendingText();
+      blocks.push(buildMediaBlock(directiveMedia));
       continue;
     }
 
-    const textMatch = unbulleted.match(/^text\s*[:：]\s*(.+)$/i);
-    if (textMatch?.[1]) {
-      textLines.push(textMatch[1].trim());
+    const mixedDirective = parseMixedMediaDirective(unbulleted);
+    if (mixedDirective) {
+      const before = mixedDirective.before.trim();
+      if (before) pendingTextLines.push(before);
+      flushPendingText();
+      blocks.push(buildMediaBlock(mixedDirective.source));
       continue;
     }
 
-    const mixedMedia = unbulleted.match(/^(.*?)(?:\s+)?mediaUrl\s*[:：]\s*(.+)$/i);
-    if (mixedMedia?.[2]) {
-      const maybeText = mixedMedia[1].trim();
-      if (maybeText) textLines.push(maybeText);
-      mediaValues.push(cleanMediaValue(mixedMedia[2]));
+    const segments = extractMarkdownImageSegments(unbulleted);
+    if (!segments.length) {
+      pendingTextLines.push(unbulleted.replace(/^[\]\s]+/, '').trim());
       continue;
     }
 
-    const mixedDirective = unbulleted.match(/^(.*?)(?:\s+)?MEDIA\s*:\s*(.+)$/);
-    if (mixedDirective?.[2]) {
-      const maybeText = mixedDirective[1].trim();
-      if (maybeText) textLines.push(maybeText);
-      mediaValues.push(cleanMediaValue(mixedDirective[2]));
-      continue;
+    for (const segment of segments) {
+      if (segment.type === 'text') {
+        if (segment.text) pendingTextLines.push(segment.text);
+        continue;
+      }
+      flushPendingText();
+      blocks.push(buildMediaBlock(segment.source, segment.alt));
     }
-
-    textLines.push(unbulleted.replace(/^[\]\s]+/, '').trim());
   }
 
-  const blocks = [];
-  const cleanText = textLines.join('\n').trim();
-  if (cleanText) blocks.push({ type: 'text', text: cleanText });
-
-  for (const mediaValue of mediaValues.filter(Boolean)) {
-    blocks.push({ type: guessMediaTypeByPath(mediaValue), source: mediaValue, name: path.basename(mediaValue) });
-  }
-
+  flushPendingText();
   return dedupeBlocks(blocks);
+}
+
+function parseStandaloneMediaDirective(line) {
+  const mediaMatch = line.match(/^mediaUrl\s*[:：]\s*(.+)$/i);
+  if (mediaMatch?.[1]) {
+    const source = cleanMediaValue(mediaMatch[1]);
+    return isLikelyMediaSource(source) ? source : null;
+  }
+
+  const mediaDirective = line.match(/^MEDIA\s*:\s*(.+)$/);
+  if (mediaDirective?.[1]) {
+    const source = cleanMediaValue(mediaDirective[1]);
+    return isLikelyMediaSource(source) ? source : null;
+  }
+
+  return null;
+}
+
+function parseMixedMediaDirective(line) {
+  const mixedMedia = line.match(/^(.*?)(?:\s+)?mediaUrl\s*[:：]\s*(.+)$/i);
+  if (mixedMedia?.[2]) {
+    const source = cleanMediaValue(mixedMedia[2]);
+    if (isLikelyMediaSource(source)) {
+      return { before: mixedMedia[1] || '', source };
+    }
+  }
+
+  const mixedDirective = line.match(/^(.*?)(?:\s+)?MEDIA\s*:\s*(.+)$/);
+  if (mixedDirective?.[2]) {
+    const source = cleanMediaValue(mixedDirective[2]);
+    if (isLikelyMediaSource(source)) {
+      return { before: mixedDirective[1] || '', source };
+    }
+  }
+
+  return null;
+}
+
+function extractMarkdownImageSegments(line) {
+  const pattern = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  const segments = [];
+  let cursor = 0;
+  let match;
+
+  while ((match = pattern.exec(line))) {
+    const before = line.slice(cursor, match.index).trim();
+    if (before) segments.push({ type: 'text', text: before });
+
+    const source = cleanMediaValue(match[2]);
+    if (isLikelyMediaSource(source)) {
+      segments.push({ type: 'media', source, alt: normalizeOptionalString(match[1]) || undefined });
+    } else {
+      segments.push({ type: 'text', text: match[0] });
+    }
+    cursor = pattern.lastIndex;
+  }
+
+  const after = line.slice(cursor).trim();
+  if (after) segments.push({ type: 'text', text: after });
+
+  return segments;
+}
+
+function buildMediaBlock(source, name) {
+  return {
+    type: guessMediaTypeByPath(source),
+    source,
+    name: normalizeOptionalString(name) || path.basename(source)
+  };
+}
+
+function isLikelyMediaSource(value) {
+  const source = String(value || '').trim();
+  if (!source) return false;
+  if (/^https?:\/\//i.test(source)) return true;
+  if (/^(\/|\.{1,2}\/|~\/)/.test(source)) return true;
+  if (/^[a-zA-Z]:[\\/]/.test(source)) return true;
+  return false;
 }
 
 function normalizeInputBlocks(value) {
