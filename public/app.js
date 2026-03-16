@@ -7,9 +7,10 @@ const state = {
   nextBefore: null,
   hasMore: false,
   loadingHistory: false,
-  sending: false,
+  sendingSessionKeys: new Set(),
   pollingTimer: null,
   selectedOpenPromise: null,
+  openRequestId: 0,
   commandCatalog: [],
   allowedCommands: new Set(),
   settingsOpen: false,
@@ -260,6 +261,8 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   if (!agentId) return;
   if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
 
+  const requestId = state.openRequestId + 1;
+  state.openRequestId = requestId;
   state.activeAgentId = agentId;
   renderAgentList();
   updateHeader();
@@ -269,11 +272,13 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
 
   const promise = (async () => {
     const response = await apiPost(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/open`, {});
+    if (requestId !== state.openRequestId || state.activeAgentId !== agentId) return;
     state.activeSessionKey = response.sessionKey;
     state.messages = Array.isArray(response.history?.messages) ? response.history.messages : [];
     state.nextBefore = response.history?.nextBefore || null;
     state.hasMore = Boolean(response.history?.hasMore);
     renderMessages();
+    syncComposerInteractivity();
     updateHeader();
     populateSettingsForm();
     if (!preserveScrollBottom) scrollMessagesToBottom();
@@ -369,7 +374,7 @@ function renderMessages() {
     messageListEl.append(row);
   }
 
-  if (state.sending) {
+  if (isActiveSessionBusy()) {
     messageListEl.append(createAssistantProcessingRow());
   }
 }
@@ -550,11 +555,15 @@ function syncVisualBubbleWidth(bubble) {
 
 async function loadOlderHistory() {
   if (!state.activeAgentId || !state.nextBefore || state.loadingHistory) return;
+  const targetAgentId = state.activeAgentId;
+  const targetSessionKey = state.activeSessionKey;
+  const targetBefore = state.nextBefore;
   state.loadingHistory = true;
   const previousHeight = messageListEl.scrollHeight;
 
   try {
-    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(state.activeAgentId)}/history?limit=30&before=${encodeURIComponent(state.nextBefore)}`);
+    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(targetAgentId)}/history?limit=30&before=${encodeURIComponent(targetBefore)}`);
+    if (!isOperationContextActive({ agentId: targetAgentId, sessionKey: targetSessionKey })) return;
     const incoming = Array.isArray(data.messages) ? data.messages : [];
     state.messages = [...incoming, ...state.messages];
     state.nextBefore = data.nextBefore || null;
@@ -569,7 +578,11 @@ async function loadOlderHistory() {
 
 async function handleSendSubmit(event) {
   event.preventDefault();
-  if (!state.activeSessionKey || state.sending) return;
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+
+  const targetSessionKey = state.activeSessionKey;
+  const targetAgentId = state.activeAgentId;
+  const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
 
   const text = composerInputEl.value.trim();
   if (!text && !state.pendingUploads.length) return;
@@ -583,18 +596,16 @@ async function handleSendSubmit(event) {
     return;
   }
 
-  state.sending = true;
-  setComposerEnabled(false);
-  showStatus(getSendingStatusMessage(), 'info');
+  beginSessionActivity(targetSessionKey);
+  showContextStatus(context, getSendingStatusMessage(), 'info');
 
   let uploadedBlocks = [];
 
   try {
     uploadedBlocks = await ensurePendingUploadsReady();
   } catch (error) {
-    state.sending = false;
-    setComposerEnabled(true);
-    showStatus(`附件处理失败：${formatError(error)}`, 'error');
+    endSessionActivity(targetSessionKey);
+    showContextStatus(context, `附件处理失败：${formatError(error)}`, 'error');
     return;
   }
 
@@ -616,29 +627,34 @@ async function handleSendSubmit(event) {
   scrollMessagesToBottom();
 
   try {
-    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(state.activeSessionKey)}/send`, {
+    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/send`, {
       text,
       blocks: uploadedBlocks
     });
-    if (response?.message) state.messages.push(response.message);
+    if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
     releasePendingUploads(draftAttachments);
-    renderMessages();
-    scrollMessagesToBottom();
-    showStatus('发送完成。', 'success');
+    if (isOperationContextActive(context)) {
+      renderMessages();
+      scrollMessagesToBottom();
+    }
+    showContextStatus(context, '发送完成。', 'success');
     await refreshAgents({ autoOpen: false });
   } catch (error) {
-    state.messages = state.messages.filter((item) => item.id !== optimistic.id);
-    composerInputEl.value = draftText;
-    state.pendingUploads = draftAttachments;
-    renderPendingUploads();
-    autoResizeComposer();
-    renderMessages();
-    showStatus(`发送失败：${formatError(error)}`, 'error');
+    if (isOperationContextActive(context)) {
+      state.messages = state.messages.filter((item) => item.id !== optimistic.id);
+      composerInputEl.value = draftText;
+      state.pendingUploads = draftAttachments;
+      renderPendingUploads();
+      autoResizeComposer();
+      renderMessages();
+    }
+    showContextStatus(context, `发送失败：${formatError(error)}`, 'error');
   } finally {
-    state.sending = false;
-    setComposerEnabled(true);
-    renderMessages();
-    scrollMessagesToBottom();
+    endSessionActivity(targetSessionKey);
+    if (isOperationContextActive(context)) {
+      renderMessages();
+      scrollMessagesToBottom();
+    }
   }
 }
 
@@ -820,24 +836,29 @@ function getCommandCategoryLabel(category) {
 }
 
 async function executeSlashCommand(command) {
-  if (!state.activeSessionKey || state.sending) return;
-  state.sending = true;
-  setComposerEnabled(false);
-  showStatus(`正在执行 ${command.split(/\s+/, 1)[0]}…`, 'info');
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  const targetSessionKey = state.activeSessionKey;
+  const targetAgentId = state.activeAgentId;
+  const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
+  beginSessionActivity(targetSessionKey);
+  showContextStatus(context, `正在执行 ${command.split(/\s+/, 1)[0]}…`, 'info');
 
   try {
-    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(state.activeSessionKey)}/command`, { command });
-    if (response?.message) state.messages.push(response.message);
-    renderMessages();
-    scrollMessagesToBottom();
-    showStatus(buildSlashCommandSuccessMessage(command), 'success');
+    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/command`, { command });
+    if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
+    if (isOperationContextActive(context)) {
+      renderMessages();
+      scrollMessagesToBottom();
+    }
+    showContextStatus(context, buildSlashCommandSuccessMessage(command), 'success');
     await refreshAgents({ autoOpen: false });
   } catch (error) {
-    showStatus(`命令失败：${formatError(error)}`, 'error');
+    showContextStatus(context, `命令失败：${formatError(error)}`, 'error');
   } finally {
-    state.sending = false;
-    setComposerEnabled(true);
-    renderMessages();
+    endSessionActivity(targetSessionKey);
+    if (isOperationContextActive(context)) {
+      renderMessages();
+    }
   }
 }
 
@@ -1121,7 +1142,7 @@ function renderPendingUploads() {
     remove.type = 'button';
     remove.className = 'pending-upload-remove';
     remove.textContent = '移除';
-    remove.disabled = state.sending;
+    remove.disabled = isActiveSessionBusy();
     remove.addEventListener('click', () => removePendingUpload(attachment.id));
 
     meta.append(title, subtitle);
@@ -1728,6 +1749,11 @@ function getSendingStatusMessage() {
   return '正在上传附件并发送…';
 }
 
+function showContextStatus(context, message, tone = 'info') {
+  if (!isOperationContextActive(context)) return;
+  showStatus(message, tone);
+}
+
 function showStatus(message, tone = 'info') {
   chatStatusEl.textContent = message || '';
   chatStatusEl.style.color = tone === 'error' ? '#fca5a5' : tone === 'success' ? '#86efac' : '';
@@ -1766,6 +1792,10 @@ function autoResizeComposer() {
   composerInputEl.style.height = `${Math.min(composerInputEl.scrollHeight, 180)}px`;
 }
 
+function syncComposerInteractivity() {
+  setComposerEnabled(Boolean(state.activeSessionKey) && !isActiveSessionBusy());
+}
+
 function setComposerEnabled(enabled) {
   composerInputEl.disabled = !enabled;
   sendButtonEl.disabled = !enabled;
@@ -1774,6 +1804,37 @@ function setComposerEnabled(enabled) {
   mediaUploadInputEl.disabled = !enabled;
   if (!enabled) closeCommandMenu();
   renderPendingUploads();
+}
+
+function beginSessionActivity(sessionKey) {
+  if (!sessionKey) return;
+  state.sendingSessionKeys.add(sessionKey);
+  if (state.activeSessionKey === sessionKey) {
+    syncComposerInteractivity();
+  }
+}
+
+function endSessionActivity(sessionKey) {
+  if (!sessionKey) return;
+  state.sendingSessionKeys.delete(sessionKey);
+  if (state.activeSessionKey === sessionKey) {
+    syncComposerInteractivity();
+  }
+}
+
+function isSessionBusy(sessionKey) {
+  return Boolean(sessionKey) && state.sendingSessionKeys.has(sessionKey);
+}
+
+function isActiveSessionBusy() {
+  return isSessionBusy(state.activeSessionKey);
+}
+
+function isOperationContextActive(context) {
+  if (!context) return false;
+  if (context.agentId && state.activeAgentId !== context.agentId) return false;
+  if (context.sessionKey && state.activeSessionKey !== context.sessionKey) return false;
+  return true;
 }
 
 function startPolling() {

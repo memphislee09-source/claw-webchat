@@ -11,3 +11,4 @@
 ## 2026-03-16
 - slash 菜单新增 DOM 但未形成可用交互 / 原因：只补了 `public/index.html` 与 `public/app.js` 的命令菜单骨架，没有同步 `.hidden` 与菜单样式，菜单显示/隐藏状态不可靠 / 修复：在 `public/styles.css` 增加 `.hidden`、`command-picker`、`command-menu`、`command-item` 等样式，并补按钮展开态 / 预防措施：页面级改动必须同时校验 DOM、交互 JS、样式三件套，自测里增加菜单存在性与样式断言
 - 本地 slash 命令的非法参数被当成接口错误 / 原因：`runSlashCommand(...)` 在 `/think`、`/fast`、`/verbose` 参数无效时直接抛错，前端只能收到 HTTP 500，而不是原生 WebUI 风格的本地提示 / 修复：服务端改为本地生成 assistant 提示消息，并补齐查询/设置分支与 `sessions.list`、`models.list`、`sessions.patch`、`sessions.compact` 语义 / 预防措施：把 slash 参数校验视为正常用户路径，优先返回本地提示消息；自测覆盖 `/model`、`/think`、`/new`
+- 跨 agent 会话串 processing 状态与最新回复 / 原因：前端把 `sending` 和 `messages` 作为全局当前视图状态使用，异步发送回包、slash 回包、历史加载都没有绑定发起时的 `sessionKey`；切换会话后，旧请求结果会写入当前打开的会话 / 修复：改为按 `sessionKey` 维护发送中状态，并为发送、slash、历史加载、会话打开都增加上下文校验，只在请求仍属于当前会话时才更新 UI / 预防措施：前端所有异步 UI 写入都必须携带会话上下文；手工回归必须覆盖“处理中切换 agent”的竞态场景
