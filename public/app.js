@@ -7,9 +7,12 @@ const state = {
   nextBefore: null,
   hasMore: false,
   loadingHistory: false,
-  sending: false,
+  sendingSessionKeys: new Set(),
   pollingTimer: null,
   selectedOpenPromise: null,
+  openRequestId: 0,
+  commandCatalog: [],
+  allowedCommands: new Set(),
   settingsOpen: false,
   settingsExpandedSection: null,
   settingsSelectedContactKey: null,
@@ -43,6 +46,7 @@ const composerFormEl = document.getElementById('composerForm');
 const composerInputEl = document.getElementById('composerInput');
 const sendButtonEl = document.getElementById('sendButton');
 const newContextButtonEl = document.getElementById('newContextButton');
+const commandMenuEl = document.getElementById('commandMenu');
 const attachButtonEl = document.getElementById('attachButton');
 const mediaUploadInputEl = document.getElementById('mediaUploadInput');
 const pendingUploadsEl = document.getElementById('pendingUploads');
@@ -81,14 +85,19 @@ boot().catch((error) => showStatus(`初始化失败：${formatError(error)}`, 'e
 async function boot() {
   bindEvents();
   autoResizeComposer();
-  await loadSettings();
+  await Promise.all([
+    loadSettings(),
+    loadCommandCatalog()
+  ]);
   await refreshAgents({ autoOpen: true });
   startPolling();
 }
 
 function bindEvents() {
   composerFormEl.addEventListener('submit', handleSendSubmit);
-  newContextButtonEl.addEventListener('click', handleNewContext);
+  newContextButtonEl.addEventListener('click', toggleCommandMenu);
+  commandMenuEl?.addEventListener('click', handleCommandMenuClick);
+  document.addEventListener('click', handleOutsideCommandMenuClick);
   headerRefreshButtonEl.addEventListener('click', () => refreshAgents({ autoOpen: false, refreshCurrent: true }));
   refreshAgentsButtonEl?.addEventListener('click', () => refreshAgents({ autoOpen: false, refreshCurrent: true }));
   attachButtonEl.addEventListener('click', () => mediaUploadInputEl.click());
@@ -141,6 +150,7 @@ function bindEvents() {
 
   window.addEventListener('resize', () => {
     if (window.innerWidth > 900) toggleSidebar(false);
+    syncAllVisualBubbleWidths();
   });
   window.addEventListener('keydown', handleWindowKeydown);
 }
@@ -251,6 +261,8 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   if (!agentId) return;
   if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
 
+  const requestId = state.openRequestId + 1;
+  state.openRequestId = requestId;
   state.activeAgentId = agentId;
   renderAgentList();
   updateHeader();
@@ -260,11 +272,13 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
 
   const promise = (async () => {
     const response = await apiPost(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/open`, {});
+    if (requestId !== state.openRequestId || state.activeAgentId !== agentId) return;
     state.activeSessionKey = response.sessionKey;
     state.messages = Array.isArray(response.history?.messages) ? response.history.messages : [];
     state.nextBefore = response.history?.nextBefore || null;
     state.hasMore = Boolean(response.history?.hasMore);
     renderMessages();
+    syncComposerInteractivity();
     updateHeader();
     populateSettingsForm();
     if (!preserveScrollBottom) scrollMessagesToBottom();
@@ -324,15 +338,29 @@ function renderMessages() {
       else mediaBlocks.push(block);
     }
 
-    for (const block of textBlocks) {
-      bubble.append(renderMarkdownBlock(block.text || ''));
+    const hasVisualMediaBlock = mediaBlocks.some((block) => block.type === 'image' || block.type === 'video');
+    if (hasVisualMediaBlock) {
+      row.classList.add('visual-media-row');
+      bubble.classList.add('visual-media-bubble');
+    }
+
+    if (textBlocks.length) {
+      const textWrap = document.createElement('div');
+      textWrap.className = 'message-text-stack';
+      for (const block of textBlocks) {
+        textWrap.append(renderMarkdownBlock(block.text || ''));
+      }
+      bubble.append(textWrap);
     }
 
     if (mediaBlocks.length) {
       const mediaWrap = document.createElement('div');
       mediaWrap.className = 'message-media';
+      if (hasVisualMediaBlock) {
+        mediaWrap.classList.add('visual-media');
+      }
       for (const block of mediaBlocks) {
-        mediaWrap.append(renderMediaBlock(block));
+        mediaWrap.append(renderMediaBlock(block, bubble));
       }
       bubble.append(mediaWrap);
     }
@@ -346,12 +374,12 @@ function renderMessages() {
     messageListEl.append(row);
   }
 
-  if (state.sending) {
+  if (isActiveSessionBusy()) {
     messageListEl.append(createAssistantProcessingRow());
   }
 }
 
-function renderMediaBlock(block) {
+function renderMediaBlock(block, bubble = null) {
   if (block.invalid) {
     return createInvalidMediaCard(block.name || block.type || '文件', block.invalidReason || '文件丢失');
   }
@@ -369,6 +397,7 @@ function renderMediaBlock(block) {
     image.alt = block.name || '图片';
     image.loading = 'lazy';
     keepMessagesPinnedOnMediaLoad(image, 'load');
+    bindVisualMediaWidth(bubble, wrapper, image, 'load');
     image.addEventListener('error', () => wrapper.replaceWith(createInvalidMediaCard(block.name || '图片', '图片加载失败')));
     wrapper.append(image);
     return wrapper;
@@ -403,6 +432,7 @@ function renderMediaBlock(block) {
     video.preload = 'metadata';
     video.src = block.url;
     keepMessagesPinnedOnMediaLoad(video, 'loadedmetadata');
+    bindVisualMediaWidth(bubble, wrapper, video, 'loadedmetadata');
     video.addEventListener('error', () => wrapper.replaceWith(createInvalidMediaCard(block.name || '视频', '视频加载失败')));
     wrapper.append(video);
     return wrapper;
@@ -480,13 +510,60 @@ function createInvalidMediaCard(titleText, reasonText) {
   return invalid;
 }
 
+function bindVisualMediaWidth(bubble, wrapper, mediaElement, eventName) {
+  if (!bubble || !wrapper) return;
+
+  const applyWidth = () => {
+    requestAnimationFrame(() => {
+      syncVisualBubbleWidth(bubble);
+      requestAnimationFrame(() => syncVisualBubbleWidth(bubble));
+    });
+  };
+
+  if (mediaElement.complete || mediaElement.readyState >= 1) {
+    applyWidth();
+  }
+
+  mediaElement.addEventListener(eventName, applyWidth, { once: true });
+}
+
+function syncAllVisualBubbleWidths() {
+  document.querySelectorAll('.message-bubble.visual-media-bubble').forEach((bubble) => {
+    syncVisualBubbleWidth(bubble);
+  });
+}
+
+function syncVisualBubbleWidth(bubble) {
+  if (!bubble) return;
+  const mediaElements = Array.from(bubble.querySelectorAll('.message-image, .message-video'));
+  let width = 0;
+
+  for (const mediaElement of mediaElements) {
+    const nextWidth = Math.round(mediaElement.getBoundingClientRect().width);
+    if (nextWidth > width) width = nextWidth;
+  }
+
+  if (width <= 0) return;
+
+  bubble.dataset.mediaMeasured = 'true';
+  bubble.dataset.visualMediaWidth = String(width);
+  bubble.style.setProperty('--visual-media-width', `${width}px`);
+  bubble.querySelectorAll('.message-image-button, .message-video-shell').forEach((wrapper) => {
+    wrapper.style.setProperty('--visual-media-width', `${width}px`);
+  });
+}
+
 async function loadOlderHistory() {
   if (!state.activeAgentId || !state.nextBefore || state.loadingHistory) return;
+  const targetAgentId = state.activeAgentId;
+  const targetSessionKey = state.activeSessionKey;
+  const targetBefore = state.nextBefore;
   state.loadingHistory = true;
   const previousHeight = messageListEl.scrollHeight;
 
   try {
-    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(state.activeAgentId)}/history?limit=30&before=${encodeURIComponent(state.nextBefore)}`);
+    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(targetAgentId)}/history?limit=30&before=${encodeURIComponent(targetBefore)}`);
+    if (!isOperationContextActive({ agentId: targetAgentId, sessionKey: targetSessionKey })) return;
     const incoming = Array.isArray(data.messages) ? data.messages : [];
     state.messages = [...incoming, ...state.messages];
     state.nextBefore = data.nextBefore || null;
@@ -501,27 +578,34 @@ async function loadOlderHistory() {
 
 async function handleSendSubmit(event) {
   event.preventDefault();
-  if (!state.activeSessionKey || state.sending) return;
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+
+  const targetSessionKey = state.activeSessionKey;
+  const targetAgentId = state.activeAgentId;
+  const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
 
   const text = composerInputEl.value.trim();
   if (!text && !state.pendingUploads.length) return;
-  if (text === '/new' && !state.pendingUploads.length) {
-    await handleNewContext();
+
+  const slashName = getSlashCommandName(text);
+  if (text && !state.pendingUploads.length && isWhitelistedSlash(slashName)) {
+    composerInputEl.value = '';
+    autoResizeComposer();
+    closeCommandMenu();
+    await executeSlashCommand(text);
     return;
   }
 
-  state.sending = true;
-  setComposerEnabled(false);
-  showStatus(getSendingStatusMessage(), 'info');
+  beginSessionActivity(targetSessionKey);
+  showContextStatus(context, getSendingStatusMessage(), 'info');
 
   let uploadedBlocks = [];
 
   try {
     uploadedBlocks = await ensurePendingUploadsReady();
   } catch (error) {
-    state.sending = false;
-    setComposerEnabled(true);
-    showStatus(`附件处理失败：${formatError(error)}`, 'error');
+    endSessionActivity(targetSessionKey);
+    showContextStatus(context, `附件处理失败：${formatError(error)}`, 'error');
     return;
   }
 
@@ -543,29 +627,34 @@ async function handleSendSubmit(event) {
   scrollMessagesToBottom();
 
   try {
-    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(state.activeSessionKey)}/send`, {
+    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/send`, {
       text,
       blocks: uploadedBlocks
     });
-    if (response?.message) state.messages.push(response.message);
+    if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
     releasePendingUploads(draftAttachments);
-    renderMessages();
-    scrollMessagesToBottom();
-    showStatus('发送完成。', 'success');
+    if (isOperationContextActive(context)) {
+      renderMessages();
+      scrollMessagesToBottom();
+    }
+    showContextStatus(context, '发送完成。', 'success');
     await refreshAgents({ autoOpen: false });
   } catch (error) {
-    state.messages = state.messages.filter((item) => item.id !== optimistic.id);
-    composerInputEl.value = draftText;
-    state.pendingUploads = draftAttachments;
-    renderPendingUploads();
-    autoResizeComposer();
-    renderMessages();
-    showStatus(`发送失败：${formatError(error)}`, 'error');
+    if (isOperationContextActive(context)) {
+      state.messages = state.messages.filter((item) => item.id !== optimistic.id);
+      composerInputEl.value = draftText;
+      state.pendingUploads = draftAttachments;
+      renderPendingUploads();
+      autoResizeComposer();
+      renderMessages();
+    }
+    showContextStatus(context, `发送失败：${formatError(error)}`, 'error');
   } finally {
-    state.sending = false;
-    setComposerEnabled(true);
-    renderMessages();
-    scrollMessagesToBottom();
+    endSessionActivity(targetSessionKey);
+    if (isOperationContextActive(context)) {
+      renderMessages();
+      scrollMessagesToBottom();
+    }
   }
 }
 
@@ -603,26 +692,197 @@ async function handleFileSelection(event) {
   scrollMessagesToBottom();
 }
 
-async function handleNewContext() {
-  if (!state.activeSessionKey || state.sending) return;
-  state.sending = true;
-  setComposerEnabled(false);
-  showStatus('正在重置上游上下文…', 'info');
+async function loadCommandCatalog() {
+  try {
+    const payload = await apiGet('/api/openclaw-webchat/commands');
+    state.commandCatalog = Array.isArray(payload?.commands) ? payload.commands : [];
+    const allowed = Array.isArray(payload?.allowed) && payload.allowed.length
+      ? payload.allowed
+      : state.commandCatalog.map((item) => item?.name);
+    state.allowedCommands = new Set(allowed.map(normalizeSlashCommandName).filter(Boolean));
+  } catch {
+    state.commandCatalog = getDefaultCommandCatalog();
+    state.allowedCommands = new Set(state.commandCatalog.map((item) => normalizeSlashCommandName(item.name)).filter(Boolean));
+  }
+
+  renderCommandMenu();
+}
+
+function getDefaultCommandCatalog() {
+  return [
+    { name: '/new', description: '重置上游上下文并保留本地历史' },
+    { name: '/reset', description: '等同 /new' },
+    { name: '/model', description: '查看或设置当前模型', args: '<name>' },
+    { name: '/models', description: '查看可用模型列表（/model 别名）', args: '<name>' },
+    { name: '/think', description: '查看或设置 thinking level', args: '<level>' },
+    { name: '/fast', description: '查看或设置 fast mode', args: '<status|on|off>' },
+    { name: '/verbose', description: '查看或设置 verbose level', args: '<on|off|full>' },
+    { name: '/compact', description: '压缩当前上游 session transcript' },
+    { name: '/help', description: '显示本地 slash 命令帮助' }
+  ];
+}
+
+function renderCommandMenu() {
+  if (!commandMenuEl) return;
+  commandMenuEl.innerHTML = '';
+
+  const commands = sortCommandCatalog(state.commandCatalog.length ? state.commandCatalog : getDefaultCommandCatalog());
+  const visibleCommands = commands.filter((item) => isWhitelistedSlash(item?.name));
+
+  if (!visibleCommands.length) {
+    const empty = document.createElement('div');
+    empty.className = 'command-menu-empty';
+    empty.textContent = '当前没有可用本地命令';
+    commandMenuEl.append(empty);
+    return;
+  }
+
+  for (const [category, items] of Object.entries(groupCommandCatalog(visibleCommands))) {
+    if (!items.length) continue;
+
+    const section = document.createElement('section');
+    section.className = 'command-menu-section';
+
+    const title = document.createElement('div');
+    title.className = 'command-menu-title';
+    title.textContent = getCommandCategoryLabel(category);
+    section.append(title);
+
+    for (const item of items) {
+      section.append(createCommandMenuItem(item));
+    }
+
+    commandMenuEl.append(section);
+  }
+}
+
+function toggleCommandMenu(event) {
+  event?.stopPropagation?.();
+  setCommandMenuOpen(commandMenuEl?.classList.contains('hidden'));
+}
+
+function closeCommandMenu() {
+  setCommandMenuOpen(false);
+}
+
+async function handleCommandMenuClick(event) {
+  const button = event.target.closest('[data-command]');
+  if (!button) return;
+  const command = button.dataset.command;
+  if (!command) return;
+  closeCommandMenu();
+  await executeSlashCommand(command);
+}
+
+function handleOutsideCommandMenuClick(event) {
+  if (!commandMenuEl || commandMenuEl.classList.contains('hidden')) return;
+  if (commandMenuEl.contains(event.target) || newContextButtonEl.contains(event.target)) return;
+  closeCommandMenu();
+}
+
+function setCommandMenuOpen(open) {
+  if (!commandMenuEl) return;
+  commandMenuEl.classList.toggle('hidden', !open);
+  newContextButtonEl?.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function createCommandMenuItem(item) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'command-item';
+  button.dataset.command = item.name;
+
+  const title = document.createElement('span');
+  title.className = 'command-item-command';
+  title.textContent = item.args ? `${item.name} ${item.args}` : item.name;
+
+  const desc = document.createElement('span');
+  desc.className = 'command-item-desc';
+  desc.textContent = item.description || '';
+
+  button.append(title, desc);
+  return button;
+}
+
+function groupCommandCatalog(commands) {
+  const grouped = {
+    session: [],
+    model: [],
+    tools: []
+  };
+
+  for (const item of commands) {
+    const category = grouped[item?.category] ? item.category : 'tools';
+    grouped[category].push(item);
+  }
+
+  return grouped;
+}
+
+function sortCommandCatalog(commands) {
+  const categoryWeight = { session: 0, model: 1, tools: 2 };
+  return [...commands].sort((left, right) => {
+    const leftWeight = categoryWeight[left?.category] ?? 9;
+    const rightWeight = categoryWeight[right?.category] ?? 9;
+    if (leftWeight !== rightWeight) return leftWeight - rightWeight;
+    return String(left?.name || '').localeCompare(String(right?.name || ''));
+  });
+}
+
+function getCommandCategoryLabel(category) {
+  if (category === 'session') return 'Session';
+  if (category === 'model') return 'Model';
+  return 'Tools';
+}
+
+async function executeSlashCommand(command) {
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  const targetSessionKey = state.activeSessionKey;
+  const targetAgentId = state.activeAgentId;
+  const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
+  beginSessionActivity(targetSessionKey);
+  showContextStatus(context, `正在执行 ${command.split(/\s+/, 1)[0]}…`, 'info');
 
   try {
-    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(state.activeSessionKey)}/command`, { command: '/new' });
-    if (response?.message) state.messages.push(response.message);
-    renderMessages();
-    scrollMessagesToBottom();
-    showStatus('上游上下文已重置，本地历史已保留。', 'success');
+    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/command`, { command });
+    if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
+    if (isOperationContextActive(context)) {
+      renderMessages();
+      scrollMessagesToBottom();
+    }
+    showContextStatus(context, buildSlashCommandSuccessMessage(command), 'success');
     await refreshAgents({ autoOpen: false });
   } catch (error) {
-    showStatus(`重置失败：${formatError(error)}`, 'error');
+    showContextStatus(context, `命令失败：${formatError(error)}`, 'error');
   } finally {
-    state.sending = false;
-    setComposerEnabled(true);
-    renderMessages();
+    endSessionActivity(targetSessionKey);
+    if (isOperationContextActive(context)) {
+      renderMessages();
+    }
   }
+}
+
+function buildSlashCommandSuccessMessage(command) {
+  const name = getSlashCommandName(command);
+  if (name === '/new' || name === '/reset') return '上游上下文已重置，本地历史已保留。';
+  if (name === '/compact') return '压缩命令已执行。';
+  return `${name} 已执行。`;
+}
+
+function normalizeSlashCommandName(command) {
+  const raw = String(command || '').trim().toLowerCase();
+  if (!raw) return '';
+  return raw.startsWith('/') ? raw : `/${raw}`;
+}
+
+function getSlashCommandName(text) {
+  const parsed = String(text || '').trim().match(/^\/([^\s:]+)(?:\s*:?\s*.*)?$/u);
+  if (!parsed) return '';
+  return normalizeSlashCommandName(parsed[1]);
+}
+
+function isWhitelistedSlash(commandName) {
+  return state.allowedCommands.has(normalizeSlashCommandName(commandName));
 }
 
 function updateHeader() {
@@ -882,7 +1142,7 @@ function renderPendingUploads() {
     remove.type = 'button';
     remove.className = 'pending-upload-remove';
     remove.textContent = '移除';
-    remove.disabled = state.sending;
+    remove.disabled = isActiveSessionBusy();
     remove.addEventListener('click', () => removePendingUpload(attachment.id));
 
     meta.append(title, subtitle);
@@ -1212,6 +1472,10 @@ function handleWindowKeydown(event) {
     closeMediaViewer();
     return;
   }
+
+  if (event.key === 'Escape') {
+    closeCommandMenu();
+  }
 }
 
 function detectAttachmentKind(file) {
@@ -1485,6 +1749,11 @@ function getSendingStatusMessage() {
   return '正在上传附件并发送…';
 }
 
+function showContextStatus(context, message, tone = 'info') {
+  if (!isOperationContextActive(context)) return;
+  showStatus(message, tone);
+}
+
 function showStatus(message, tone = 'info') {
   chatStatusEl.textContent = message || '';
   chatStatusEl.style.color = tone === 'error' ? '#fca5a5' : tone === 'success' ? '#86efac' : '';
@@ -1523,13 +1792,49 @@ function autoResizeComposer() {
   composerInputEl.style.height = `${Math.min(composerInputEl.scrollHeight, 180)}px`;
 }
 
+function syncComposerInteractivity() {
+  setComposerEnabled(Boolean(state.activeSessionKey) && !isActiveSessionBusy());
+}
+
 function setComposerEnabled(enabled) {
   composerInputEl.disabled = !enabled;
   sendButtonEl.disabled = !enabled;
   newContextButtonEl.disabled = !enabled;
   attachButtonEl.disabled = !enabled;
   mediaUploadInputEl.disabled = !enabled;
+  if (!enabled) closeCommandMenu();
   renderPendingUploads();
+}
+
+function beginSessionActivity(sessionKey) {
+  if (!sessionKey) return;
+  state.sendingSessionKeys.add(sessionKey);
+  if (state.activeSessionKey === sessionKey) {
+    syncComposerInteractivity();
+  }
+}
+
+function endSessionActivity(sessionKey) {
+  if (!sessionKey) return;
+  state.sendingSessionKeys.delete(sessionKey);
+  if (state.activeSessionKey === sessionKey) {
+    syncComposerInteractivity();
+  }
+}
+
+function isSessionBusy(sessionKey) {
+  return Boolean(sessionKey) && state.sendingSessionKeys.has(sessionKey);
+}
+
+function isActiveSessionBusy() {
+  return isSessionBusy(state.activeSessionKey);
+}
+
+function isOperationContextActive(context) {
+  if (!context) return false;
+  if (context.agentId && state.activeAgentId !== context.agentId) return false;
+  if (context.sessionKey && state.activeSessionKey !== context.sessionKey) return false;
+  return true;
 }
 
 function startPolling() {

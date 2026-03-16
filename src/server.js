@@ -43,6 +43,19 @@ const BOOTSTRAP_TEXT = [
   '- If this message is understood, do not reply.'
 ].join('\n');
 
+
+const SLASH_COMMAND_DEFS = [
+  { name: '/new', description: '重置上游上下文并保留本地历史', category: 'session' },
+  { name: '/reset', description: '等同 /new', category: 'session' },
+  { name: '/model', description: '查看或设置当前模型', args: '<name>', category: 'model' },
+  { name: '/models', description: '查看可用模型列表（/model 别名）', args: '<name>', category: 'model' },
+  { name: '/think', description: '查看或设置 thinking level', args: '<level>', category: 'model' },
+  { name: '/fast', description: '查看或设置 fast mode', args: '<status|on|off>', category: 'model' },
+  { name: '/verbose', description: '查看或设置 verbose level', args: '<on|off|full>', category: 'model' },
+  { name: '/compact', description: '压缩当前上游 session transcript', category: 'session' },
+  { name: '/help', description: '显示本地 slash 命令帮助', category: 'tools' }
+];
+
 app.use(express.json({ limit: '25mb' }));
 app.use('/static', express.static(path.resolve(__dirname, '../public')));
 
@@ -55,6 +68,14 @@ ensureJsonFile(USER_PROFILE_FILE, JSON.stringify({ displayName: '我', avatarUrl
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, service: NAMESPACE, port: PORT, namespace: NAMESPACE });
+});
+
+app.get('/api/openclaw-webchat/commands', (_req, res) => {
+  res.json({
+    commands: SLASH_COMMAND_DEFS,
+    allowed: SLASH_COMMAND_DEFS.map((item) => item.name),
+    updatedAt: new Date().toISOString()
+  });
 });
 
 app.get('/api/openclaw-webchat/agents', async (_req, res) => {
@@ -295,6 +316,12 @@ app.listen(PORT, () => {
 });
 
 async function runUserTurn(binding, { text, inputBlocks }) {
+  const latestBinding = getBinding(binding.agentId) || binding;
+  const turnSnapshot = {
+    upstreamSessionKey: latestBinding.upstreamSessionKey,
+    upstreamGeneration: latestBinding.upstreamGeneration || null
+  };
+
   const userBlocks = [];
   if (text) userBlocks.push({ type: 'text', text });
   userBlocks.push(...inputBlocks);
@@ -314,24 +341,37 @@ async function runUserTurn(binding, { text, inputBlocks }) {
   });
 
   try {
-    await ensureBootstrapInjected(binding);
+    await ensureBootstrapInjected(latestBinding);
 
     const idempotencyKey = `openclaw-webchat-${Date.now()}-${cryptoId()}`;
     const startedAt = Date.now();
     const upstreamMessage = buildUpstreamMessage(userBlocks);
 
     await gatewayCall('chat.send', {
-      sessionKey: binding.upstreamSessionKey,
+      sessionKey: turnSnapshot.upstreamSessionKey,
       message: upstreamMessage,
       deliver: false,
       idempotencyKey
     });
 
-    const assistantRaw = await waitForAssistantReply(binding.upstreamSessionKey, {
+    const assistantRaw = await waitForAssistantReply(turnSnapshot.upstreamSessionKey, {
       minTimestampMs: startedAt,
       expectedUserText: upstreamMessage,
       timeoutMs: ASSISTANT_WAIT_TIMEOUT_MS
     });
+
+    if (!isBindingTurnCurrent(binding.agentId, turnSnapshot)) {
+      return {
+        message: presentHistoryEntry(normalizeHistoryRow({
+          id: cryptoId(),
+          agentId: binding.agentId,
+          sessionKey: binding.sessionKey,
+          role: 'assistant',
+          createdAt: new Date().toISOString(),
+          blocks: [{ type: 'text', text: '（上一轮回复已因上下文重置而忽略）' }]
+        }))
+      };
+    }
 
     const assistantBlocks = assistantRaw ? normalizeGatewayMessageToBlocks(assistantRaw) : [];
     const assistantMessage = normalizeHistoryRow({
@@ -355,24 +395,64 @@ async function runUserTurn(binding, { text, inputBlocks }) {
 
     return { message: presentHistoryEntry(assistantMessage) };
   } catch (error) {
-    patchBinding(binding.agentId, {
-      replyState: 'idle',
-      updatedAt: new Date().toISOString()
-    });
+    if (isBindingTurnCurrent(binding.agentId, turnSnapshot)) {
+      patchBinding(binding.agentId, {
+        replyState: 'idle',
+        updatedAt: new Date().toISOString()
+      });
+    }
     throw error;
   }
 }
 
 async function runSlashCommand(binding, command) {
-  const [nameRaw] = command.split(/\s+/, 1);
-  const name = String(nameRaw || '').toLowerCase();
-
-  if (name !== '/new') {
-    throw new Error(`Unsupported slash command: ${command}`);
+  const parsed = parseSlashCommand(command);
+  if (!parsed) {
+    throw new Error(`Invalid slash command: ${command}`);
   }
 
-  await gatewayCall('sessions.reset', { key: binding.upstreamSessionKey });
+  const latestBinding = getBinding(binding.agentId) || binding;
+  const { name, args } = parsed;
+
+  if (name === '/new' || name === '/reset') {
+    return runContextResetSlashCommand(latestBinding, command);
+  }
+
+  if (name === '/help') {
+    return buildAssistantSlashResponse(latestBinding, command, buildSlashHelpText());
+  }
+
+  if (name === '/model' || name === '/models') {
+    return runModelSlashCommand(latestBinding, command, name, args);
+  }
+
+  if (name === '/think') {
+    return runThinkSlashCommand(latestBinding, command, args);
+  }
+
+  if (name === '/fast') {
+    return runFastSlashCommand(latestBinding, command, args);
+  }
+
+  if (name === '/verbose') {
+    return runVerboseSlashCommand(latestBinding, command, args);
+  }
+
+  if (name === '/compact') {
+    return runCompactSlashCommand(latestBinding, command);
+  }
+
+  throw new Error(`Unsupported slash command: ${command}`);
+}
+
+async function runContextResetSlashCommand(binding, command) {
+  const previousUpstreamSessionKey = binding.upstreamSessionKey;
+  await gatewayCall('sessions.reset', { key: previousUpstreamSessionKey });
+
+  const nextGeneration = createUpstreamGeneration();
   patchBinding(binding.agentId, {
+    upstreamGeneration: nextGeneration,
+    upstreamSessionKey: buildUpstreamSessionKey(binding.agentId, nextGeneration),
     bootstrapVersion: null,
     replyState: 'idle',
     updatedAt: new Date().toISOString()
@@ -401,17 +481,373 @@ async function runSlashCommand(binding, command) {
   };
 }
 
+function buildAssistantSlashResponse(binding, command, text) {
+  return {
+    command,
+    message: recordAssistantTextMessage(binding, text)
+  };
+}
+
+async function runModelSlashCommand(binding, command, commandName, args) {
+  const mode = String(args || '').trim();
+  const normalizedMode = mode.toLowerCase();
+
+  try {
+    const [sessionState, modelsInfo] = await Promise.all([
+      loadUpstreamSessionState(binding.upstreamSessionKey),
+      gatewayCall('models.list', {})
+    ]);
+    const currentModel = normalizeOptionalString(sessionState?.session?.model)
+      || normalizeOptionalString(sessionState?.defaults?.model)
+      || 'default';
+    const catalogModelIds = collectCatalogModelIds(modelsInfo?.models);
+    const available = catalogModelIds.slice(0, 10);
+
+    if (!mode || normalizedMode === 'list' || commandName === '/models') {
+      const lines = [`当前模型：${currentModel}`];
+      if (available.length) {
+        lines.push(`可用模型：${available.join(', ')}${catalogModelIds.length > available.length ? ` +${catalogModelIds.length - available.length} more` : ''}`);
+      }
+      lines.push('提示：发送 /model <name> 切换模型。');
+      return buildAssistantSlashResponse(binding, command, lines.join('\n'));
+    }
+
+    if (normalizedMode === 'status') {
+      const detailLines = [
+        '当前模型状态：',
+        `- model: ${currentModel}`
+      ];
+      if (normalizeOptionalString(sessionState?.session?.modelProvider)) {
+        detailLines.push(`- provider: ${sessionState.session.modelProvider}`);
+      }
+      if (normalizeOptionalString(sessionState?.session?.baseUrl)) {
+        detailLines.push(`- baseUrl: ${sessionState.session.baseUrl}`);
+      }
+      if (normalizeOptionalString(sessionState?.session?.api)) {
+        detailLines.push(`- api: ${sessionState.session.api}`);
+      }
+      return buildAssistantSlashResponse(binding, command, detailLines.join('\n'));
+    }
+  } catch (error) {
+    return buildAssistantSlashResponse(binding, command, `获取模型信息失败：${formatError(error)}`);
+  }
+
+  const targetModel = mode;
+  try {
+    await gatewayCall('sessions.patch', { key: binding.upstreamSessionKey, model: targetModel });
+    return buildAssistantSlashResponse(binding, command, `已设置模型：${targetModel}`);
+  } catch (error) {
+    return buildAssistantSlashResponse(binding, command, `设置模型失败：${formatError(error)}`);
+  }
+}
+
+async function runThinkSlashCommand(binding, command, args) {
+  const rawLevel = String(args || '').trim();
+
+  if (!rawLevel) {
+    try {
+      const { session, models } = await loadThinkingCommandState(binding.upstreamSessionKey);
+      const currentLevel = resolveCurrentThinkingLevel(session, models);
+      const options = formatThinkingLevels(session?.modelProvider, session?.model);
+      return buildAssistantSlashResponse(binding, command, `当前 thinking level：${currentLevel}\n可选：${options}`);
+    } catch (error) {
+      return buildAssistantSlashResponse(binding, command, `获取 thinking level 失败：${formatError(error)}`);
+    }
+  }
+
+  const level = normalizeThinkLevel(rawLevel);
+  if (!level) {
+    try {
+      const { session } = await loadThinkingCommandState(binding.upstreamSessionKey);
+      return buildAssistantSlashResponse(
+        binding,
+        command,
+        `未识别的 thinking level：${rawLevel}\n可选：${formatThinkingLevels(session?.modelProvider, session?.model)}`
+      );
+    } catch (error) {
+      return buildAssistantSlashResponse(binding, command, `校验 thinking level 失败：${formatError(error)}`);
+    }
+  }
+
+  try {
+    await gatewayCall('sessions.patch', { key: binding.upstreamSessionKey, thinkingLevel: level });
+    return buildAssistantSlashResponse(binding, command, `已设置 thinking level：${level}`);
+  } catch (error) {
+    return buildAssistantSlashResponse(binding, command, `设置 thinking level 失败：${formatError(error)}`);
+  }
+}
+
+async function runFastSlashCommand(binding, command, args) {
+  const mode = String(args || '').trim().toLowerCase();
+  if (!mode || mode === 'status') {
+    try {
+      const sessionRow = await loadUpstreamSessionRow(binding.upstreamSessionKey);
+      return buildAssistantSlashResponse(
+        binding,
+        command,
+        `当前 fast mode：${resolveCurrentFastMode(sessionRow)}\n可选：status, on, off`
+      );
+    } catch (error) {
+      return buildAssistantSlashResponse(binding, command, `获取 fast mode 失败：${formatError(error)}`);
+    }
+  }
+
+  if (mode !== 'on' && mode !== 'off') {
+    return buildAssistantSlashResponse(binding, command, `未识别的 fast mode：${args}\n可选：status, on, off`);
+  }
+
+  try {
+    await gatewayCall('sessions.patch', { key: binding.upstreamSessionKey, fastMode: mode === 'on' });
+    return buildAssistantSlashResponse(binding, command, `Fast mode 已${mode === 'on' ? '开启' : '关闭'}`);
+  } catch (error) {
+    return buildAssistantSlashResponse(binding, command, `设置 fast mode 失败：${formatError(error)}`);
+  }
+}
+
+async function runVerboseSlashCommand(binding, command, args) {
+  const rawLevel = String(args || '').trim();
+
+  if (!rawLevel) {
+    try {
+      const sessionRow = await loadUpstreamSessionRow(binding.upstreamSessionKey);
+      const currentLevel = normalizeVerboseLevel(sessionRow?.verboseLevel) || 'off';
+      return buildAssistantSlashResponse(binding, command, `当前 verbose level：${currentLevel}\n可选：on, full, off`);
+    } catch (error) {
+      return buildAssistantSlashResponse(binding, command, `获取 verbose level 失败：${formatError(error)}`);
+    }
+  }
+
+  const level = normalizeVerboseLevel(rawLevel);
+  if (!level) {
+    return buildAssistantSlashResponse(binding, command, `未识别的 verbose level：${rawLevel}\n可选：on, full, off`);
+  }
+
+  try {
+    await gatewayCall('sessions.patch', { key: binding.upstreamSessionKey, verboseLevel: level });
+    return buildAssistantSlashResponse(binding, command, `已设置 verbose level：${level}`);
+  } catch (error) {
+    return buildAssistantSlashResponse(binding, command, `设置 verbose level 失败：${formatError(error)}`);
+  }
+}
+
+async function runCompactSlashCommand(binding, command) {
+  try {
+    const compactResult = await gatewayCall('sessions.compact', { key: binding.upstreamSessionKey });
+    const compacted = compactResult?.compacted === true;
+    const text = compacted
+      ? `已压缩当前上游会话，上次保留 ${compactResult?.kept ?? 'unknown'} 行 transcript。`
+      : `当前无需压缩：${compactResult?.reason || `已保留 ${compactResult?.kept ?? 'unknown'} 行`}`;
+    return buildAssistantSlashResponse(binding, command, text);
+  } catch (error) {
+    return buildAssistantSlashResponse(binding, command, `压缩失败：${formatError(error)}`);
+  }
+}
+
+function parseSlashCommand(command) {
+  const trimmed = String(command || '').trim();
+  if (!trimmed.startsWith('/')) return null;
+  const body = trimmed.slice(1);
+  const firstSeparator = body.search(/[\s:]/u);
+  const rawName = firstSeparator === -1 ? body : body.slice(0, firstSeparator);
+  let remainder = firstSeparator === -1 ? '' : body.slice(firstSeparator).trimStart();
+  if (remainder.startsWith(':')) remainder = remainder.slice(1).trimStart();
+  const name = `/${String(rawName || '').trim().toLowerCase()}`;
+  if (!name || name === '/') return null;
+  return { name, args: remainder.trim() };
+}
+
+function buildSlashHelpText() {
+  return [
+    '可用本地命令：',
+    ...SLASH_COMMAND_DEFS.map((item) => `- ${item.name}${item.args ? ` ${item.args}` : ''}：${item.description}`),
+    '',
+    '说明：这些命令在 openclaw-webchat 内本地执行，不会作为普通消息发给 agent。'
+  ].join('\n');
+}
+
+function recordAssistantTextMessage(binding, text) {
+  const message = normalizeHistoryRow({
+    id: cryptoId(),
+    agentId: binding.agentId,
+    sessionKey: binding.sessionKey,
+    role: 'assistant',
+    createdAt: new Date().toISOString(),
+    blocks: [{ type: 'text', text }]
+  });
+  appendHistory(binding.agentId, binding.sessionKey, message);
+  patchBinding(binding.agentId, {
+    replyState: 'idle',
+    lastAssistantAt: message.createdAt,
+    lastSummary: buildMessageSummary(message),
+    updatedAt: new Date().toISOString()
+  });
+  return presentHistoryEntry(message);
+}
+
+async function loadUpstreamSessionRow(sessionKey) {
+  const state = await loadUpstreamSessionState(sessionKey);
+  return state.session;
+}
+
+async function loadUpstreamSessionState(sessionKey) {
+  const payload = await gatewayCall('sessions.list', {});
+  const rows = Array.isArray(payload?.sessions) ? payload.sessions : [];
+  return {
+    session: rows.find((item) => item?.key === sessionKey) || null,
+    defaults: payload?.defaults || null
+  };
+}
+
+async function loadThinkingCommandState(sessionKey) {
+  const [sessionState, modelsInfo] = await Promise.all([
+    loadUpstreamSessionState(sessionKey),
+    gatewayCall('models.list', {})
+  ]);
+  return {
+    session: sessionState.session,
+    models: Array.isArray(modelsInfo?.models) ? modelsInfo.models : []
+  };
+}
+
+function collectCatalogModelIds(models) {
+  const seen = new Set();
+  const out = [];
+  const rows = Array.isArray(models) ? models : [];
+
+  for (const item of rows) {
+    const modelId = normalizeOptionalString(item?.id);
+    if (!modelId || seen.has(modelId)) continue;
+    seen.add(modelId);
+    out.push(modelId);
+  }
+
+  return out;
+}
+
+function normalizeThinkLevel(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  const collapsed = raw.replace(/[\s_-]+/g, '');
+  if (collapsed === 'adaptive' || collapsed === 'auto') return 'adaptive';
+  if (collapsed === 'xhigh' || collapsed === 'extrahigh') return 'xhigh';
+  if (raw === 'off') return 'off';
+  if (['on', 'enable', 'enabled'].includes(raw)) return 'low';
+  if (['min', 'minimal', 'think'].includes(raw)) return 'minimal';
+  if (['low', 'thinkhard', 'think-hard', 'think_hard'].includes(raw)) return 'low';
+  if (['mid', 'med', 'medium', 'thinkharder', 'think-harder', 'harder'].includes(raw)) return 'medium';
+  if (['high', 'ultra', 'ultrathink', 'think-hard', 'thinkhardest', 'highest', 'max'].includes(raw)) return 'high';
+  return null;
+}
+
+function normalizeVerboseLevel(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (['off', 'false', 'no', '0'].includes(raw)) return 'off';
+  if (['full', 'all', 'everything'].includes(raw)) return 'full';
+  if (['on', 'minimal', 'true', 'yes', '1'].includes(raw)) return 'on';
+  return null;
+}
+
+function resolveCurrentThinkingLevel(sessionRow, models = []) {
+  const persisted = normalizeThinkLevel(sessionRow?.thinkingLevel);
+  if (persisted) return persisted;
+  if (!sessionRow?.modelProvider || !sessionRow?.model) return 'off';
+  return resolveThinkingDefaultForModel({
+    provider: sessionRow.modelProvider,
+    model: sessionRow.model,
+    catalog: models
+  });
+}
+
+function resolveCurrentFastMode(sessionRow) {
+  return sessionRow?.fastMode === true ? 'on' : 'off';
+}
+
+function formatThinkingLevels(provider, model) {
+  return listThinkingLevelLabels(provider, model).join(', ');
+}
+
+function listThinkingLevelLabels(provider, model) {
+  if (isBinaryThinkingProvider(provider)) {
+    return ['off', 'on'];
+  }
+  return listThinkingLevels(provider, model);
+}
+
+function listThinkingLevels(provider, model) {
+  const levels = ['off', 'minimal', 'low', 'medium', 'high'];
+  if (supportsXHighThinking(provider, model)) {
+    levels.push('xhigh');
+  }
+  levels.push('adaptive');
+  return levels;
+}
+
+function supportsXHighThinking(provider, model) {
+  const modelKey = String(model || '').trim().toLowerCase();
+  if (!modelKey) return false;
+  const providerKey = String(provider || '').trim().toLowerCase();
+  const refs = new Set([
+    'openai/gpt-5.4',
+    'openai/gpt-5.4-pro',
+    'openai/gpt-5.2',
+    'openai-codex/gpt-5.4',
+    'openai-codex/gpt-5.3-codex',
+    'openai-codex/gpt-5.3-codex-spark',
+    'openai-codex/gpt-5.2-codex',
+    'openai-codex/gpt-5.1-codex',
+    'github-copilot/gpt-5.2-codex',
+    'github-copilot/gpt-5.2'
+  ]);
+  const modelIds = new Set([...refs].map((entry) => entry.split('/')[1]));
+  return providerKey ? refs.has(`${providerKey}/${modelKey}`) : modelIds.has(modelKey);
+}
+
+function isBinaryThinkingProvider(provider) {
+  return normalizeThinkingProvider(provider) === 'zai';
+}
+
+function normalizeThinkingProvider(provider) {
+  const normalized = String(provider || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'z.ai' || normalized === 'z-ai') return 'zai';
+  if (normalized === 'bedrock' || normalized === 'aws-bedrock') return 'amazon-bedrock';
+  return normalized;
+}
+
+function resolveThinkingDefaultForModel({ provider, model, catalog = [] }) {
+  const normalizedProvider = normalizeThinkingProvider(provider);
+  const modelLower = String(model || '').trim().toLowerCase();
+  const isAnthropicFamilyModel = normalizedProvider === 'anthropic'
+    || normalizedProvider === 'amazon-bedrock'
+    || modelLower.includes('anthropic/')
+    || modelLower.includes('.anthropic.');
+  if (isAnthropicFamilyModel && /claude-(?:opus|sonnet)-4(?:\.|-)6(?:$|[-.])/i.test(modelLower)) {
+    return 'adaptive';
+  }
+
+  const candidate = Array.isArray(catalog)
+    ? catalog.find((entry) =>
+      normalizeThinkingProvider(entry?.provider) === normalizedProvider
+      && String(entry?.id || '').trim().toLowerCase() === modelLower)
+    : null;
+
+  return candidate?.reasoning === true ? 'low' : 'off';
+}
+
 function ensureBinding(agentId) {
   const bindings = readJson(BINDINGS_FILE);
   const existing = bindings[agentId];
   if (existing) return existing;
 
   const now = new Date().toISOString();
+  const upstreamGeneration = 'main';
   const created = {
     agentId,
     namespace: NAMESPACE,
     sessionKey: `${NAMESPACE}:${agentId}`,
-    upstreamSessionKey: buildUpstreamSessionKey(agentId),
+    upstreamGeneration,
+    upstreamSessionKey: buildUpstreamSessionKey(agentId, upstreamGeneration),
     bootstrapVersion: null,
     replyState: 'idle',
     createdAt: now,
@@ -460,8 +896,25 @@ async function ensureBootstrapInjected(binding) {
   });
 }
 
-function buildUpstreamSessionKey(agentId) {
-  return `agent:${agentId}:${NAMESPACE}:main`;
+function buildUpstreamSessionKey(agentId, generation = 'main') {
+  return `agent:${agentId}:${NAMESPACE}:${sanitizeSessionKeyPart(generation)}`;
+}
+
+function createUpstreamGeneration() {
+  return `reset-${Date.now()}-${cryptoId()}`;
+}
+
+function sanitizeSessionKeyPart(value) {
+  const normalized = String(value || 'main').trim().replace(/[^a-zA-Z0-9._-]+/g, '-');
+  return normalized || 'main';
+}
+
+function isBindingTurnCurrent(agentId, turnSnapshot) {
+  const latest = getBinding(agentId);
+  if (!latest) return false;
+  const latestGeneration = sanitizeSessionKeyPart(latest.upstreamGeneration || latest.upstreamSessionKey || 'main');
+  const expectedGeneration = sanitizeSessionKeyPart(turnSnapshot?.upstreamGeneration || turnSnapshot?.upstreamSessionKey || 'main');
+  return latest.upstreamSessionKey === turnSnapshot?.upstreamSessionKey && latestGeneration === expectedGeneration;
 }
 
 function buildUpstreamMessage(blocks) {

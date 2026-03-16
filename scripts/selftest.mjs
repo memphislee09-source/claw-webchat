@@ -1,15 +1,25 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const base = process.env.OPENCLAW_WEBCHAT_BASE || 'http://127.0.0.1:3770';
 const agentId = process.env.OPENCLAW_WEBCHAT_TEST_AGENT || 'mira';
 const sessionKey = `openclaw-webchat:${agentId}`;
+const defaultBindingsFile = fileURLToPath(new URL('../data/session-bindings.json', import.meta.url));
+const bindingsFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
+  ? path.join(path.resolve(process.env.OPENCLAW_WEBCHAT_DATA_DIR), 'session-bindings.json')
+  : defaultBindingsFile;
 
 const unique = `selftest-${Date.now()}`;
 
 await checkHealth();
+await checkCommandsCatalog();
 await checkPageShell();
 await checkSettings();
 await checkAgents();
 await checkAgentProfile();
 await checkOpenAgent();
+await checkSlashCommands();
 await checkUpload();
 await checkAudioUpload();
 await checkSend();
@@ -28,9 +38,11 @@ async function checkPageShell() {
   assert(html.includes('id="agentList"'), 'page should contain agentList');
   assert(html.includes('id="messageList"'), 'page should contain messageList');
   assert(html.includes('id="composerInput"'), 'page should contain composerInput');
-  assert(html.includes('Enter 换行；点击发送提交'), 'page should reflect enter-to-newline composer hint');
+  assert(html.includes('slash 命令可执行本地命令'), 'page should reflect slash command composer hint');
   assert(html.includes('id="attachButton"'), 'page should contain attachButton');
   assert(html.includes('id="mediaUploadInput"'), 'page should contain mediaUploadInput');
+  assert(html.includes('id="newContextButton"'), 'page should contain slash trigger button');
+  assert(html.includes('id="commandMenu"'), 'page should contain command menu');
   assert(html.includes('id="settingsPanel"'), 'page should contain settingsPanel');
   assert(html.includes('id="settingsContactSelect"'), 'page should contain settingsContactSelect');
   assert(html.includes('id="saveSettingsButton"'), 'page should contain saveSettingsButton');
@@ -45,12 +57,19 @@ async function checkPageShell() {
   assert(appJs.includes('async function saveSettingsContact'), 'app.js should include unified visual contact settings');
   assert(appJs.includes('async function cropAvatarToSquare'), 'app.js should include avatar crop flow');
   assert(appJs.includes('function openMediaViewer'), 'app.js should include image viewer flow');
+  assert(appJs.includes('async function loadCommandCatalog'), 'app.js should include slash command catalog loading');
+  assert(appJs.includes('function renderCommandMenu'), 'app.js should include slash command menu rendering');
+  assert(appJs.includes('async function executeSlashCommand'), 'app.js should include slash command execution');
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
   assert(appJs.includes('function formatPresenceLabel'), 'app.js should include sidebar presence label formatting');
   assert(appJs.includes('function renderMarkdownBlock'), 'app.js should include markdown bubble rendering');
+  assert(appJs.includes("bubble.classList.add('visual-media-bubble')"), 'app.js should include responsive visual media bubble branch');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
+  assert(css.includes('.command-menu'), 'styles.css should include slash command menu styles');
+  assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
+  assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
   assert(css.includes('.pending-upload'), 'styles.css should include pending upload styles');
   assert(css.includes('.settings-panel'), 'styles.css should include settings panel styles');
   assert(css.includes('.settings-accordion'), 'styles.css should include accordion settings layout styles');
@@ -67,6 +86,18 @@ async function checkSettings() {
     avatarUrl: null
   });
   assert(patched?.userProfile?.displayName === 'Selftest', 'settings patch should persist displayName');
+}
+
+async function checkCommandsCatalog() {
+  const payload = await getJson('/api/openclaw-webchat/commands');
+  assert(Array.isArray(payload?.commands), 'commands endpoint should return command definitions');
+  assert(Array.isArray(payload?.allowed), 'commands endpoint should return allowed whitelist');
+  const names = payload.commands.map((item) => item?.name);
+  assert(names.includes('/new'), 'commands endpoint should include /new');
+  assert(names.includes('/model'), 'commands endpoint should include /model');
+  assert(names.includes('/think'), 'commands endpoint should include /think');
+  assert(names.includes('/compact'), 'commands endpoint should include /compact');
+  assert(payload.allowed.includes('/model'), 'commands whitelist should include /model');
 }
 
 async function checkUpload() {
@@ -119,6 +150,34 @@ async function checkOpenAgent() {
   assert(payload?.history && Array.isArray(payload.history.messages), 'open should return history page');
 }
 
+async function checkSlashCommands() {
+  const modelInfo = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
+    command: '/model'
+  });
+  const modelText = collectText(modelInfo?.message);
+  assert(modelText.includes('当前模型：'), '/model should return current model info');
+  const currentModel = modelText.match(/当前模型：([^\n]+)/)?.[1]?.trim();
+  assert(currentModel, '/model should expose current model');
+
+  const modelSet = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
+    command: `/model ${currentModel}`
+  });
+  assert(collectText(modelSet?.message).includes(`已设置模型：${currentModel}`), '/model <name> should patch the current model');
+
+  const thinkInfo = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
+    command: '/think'
+  });
+  const thinkText = collectText(thinkInfo?.message);
+  assert(thinkText.includes('当前 thinking level：'), '/think should return current thinking level');
+  const currentLevel = thinkText.match(/当前 thinking level：([^\n]+)/)?.[1]?.trim();
+  assert(currentLevel, '/think should expose current thinking level');
+
+  const thinkSet = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
+    command: `/think ${currentLevel}`
+  });
+  assert(collectText(thinkSet?.message).includes(`已设置 thinking level：${currentLevel}`), '/think <level> should patch the current thinking level');
+}
+
 async function checkSend() {
   const payload = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/send`, {
     text: `请只回复 ${unique}`
@@ -128,11 +187,20 @@ async function checkSend() {
 }
 
 async function checkReset() {
+  const before = readBinding(agentId);
+  const beforeUpstreamSessionKey = before?.upstreamSessionKey || null;
+
   const payload = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
     command: '/new'
   });
   assert(payload?.message?.role === 'marker', '/new should append marker');
   assert(payload?.message?.label === '已重置上下文', '/new marker label should match');
+
+  const after = readBinding(agentId);
+  assert(after?.upstreamSessionKey, '/new should keep an upstreamSessionKey');
+  if (beforeUpstreamSessionKey) {
+    assert(after.upstreamSessionKey !== beforeUpstreamSessionKey, '/new should rotate upstreamSessionKey to isolate late async completions');
+  }
 }
 
 async function checkHistory() {
@@ -148,6 +216,11 @@ function collectText(message) {
     .filter((block) => block.type === 'text')
     .map((block) => String(block.text || ''))
     .join('\n');
+}
+
+function readBinding(targetAgentId) {
+  const bindings = JSON.parse(fs.readFileSync(bindingsFile, 'utf8'));
+  return bindings?.[targetAgentId] || null;
 }
 
 async function getJson(path) {

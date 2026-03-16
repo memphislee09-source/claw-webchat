@@ -59,7 +59,7 @@
                 <div class="pending-uploads" id="pendingUploads" hidden></div>
                 <textarea
                   id="composerInput"
-                  placeholder="输入消息，Enter 换行；点击发送提交；/new 可重置上游上下文"
+                  placeholder="输入消息，Enter 换行；点 / 按钮或直接输入 slash 命令可执行本地命令"
                   rows="1"
                 ></textarea>
               </div>
@@ -72,7 +72,10 @@
                   hidden
                 />
                 <button class="icon-button attach-button" type="button" id="attachButton" aria-label="上传图片或音频" title="上传图片或音频">+</button>
-                <button class="ghost-button" type="button" id="newContextButton">/new</button>
+                <div class="command-picker">
+                  <button class="ghost-button command-trigger" type="button" id="newContextButton" aria-label="打开 slash 命令菜单" aria-haspopup="menu" aria-expanded="false">/</button>
+                  <div class="command-menu hidden" id="commandMenu"></div>
+                </div>
                 <button class="primary-button" type="submit" id="sendButton">发送</button>
               </div>
             </form>
