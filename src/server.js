@@ -105,7 +105,7 @@ app.get('/api/openclaw-webchat/agents', async (_req, res) => {
       return {
         agentId,
         name: profile.displayName || agentId,
-        avatarUrl: profile.avatarUrl || null,
+        avatarUrl: presentAvatarUrl(profile.avatarUrl),
         sessionKey: binding?.sessionKey || null,
         hasSession: Boolean(binding),
         summary,
@@ -193,7 +193,7 @@ app.post('/api/openclaw-webchat/sessions/:sessionKey/command', async (req, res) 
 app.patch('/api/openclaw-webchat/agents/:agentId/profile', (req, res) => {
   const { agentId } = req.params;
   const displayName = normalizeOptionalString(req.body?.displayName);
-  const avatarUrl = normalizeOptionalString(req.body?.avatarUrl);
+  const avatarUrl = normalizeAvatarValue(req.body?.avatarUrl);
 
   try {
     const profiles = readJson(PROFILES_FILE);
@@ -206,7 +206,13 @@ app.patch('/api/openclaw-webchat/agents/:agentId/profile', (req, res) => {
       updatedAt: new Date().toISOString()
     };
     writeJson(PROFILES_FILE, profiles);
-    res.json({ ok: true, profile: profiles[agentId] });
+    res.json({
+      ok: true,
+      profile: {
+        ...profiles[agentId],
+        avatarUrl: presentAvatarUrl(profiles[agentId].avatarUrl)
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: formatError(error) });
   }
@@ -215,7 +221,12 @@ app.patch('/api/openclaw-webchat/agents/:agentId/profile', (req, res) => {
 app.get('/api/openclaw-webchat/settings', (_req, res) => {
   try {
     const userProfile = readJson(USER_PROFILE_FILE);
-    res.json({ userProfile });
+    res.json({
+      userProfile: {
+        ...userProfile,
+        avatarUrl: presentAvatarUrl(userProfile.avatarUrl)
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: formatError(error) });
   }
@@ -223,7 +234,7 @@ app.get('/api/openclaw-webchat/settings', (_req, res) => {
 
 app.patch('/api/openclaw-webchat/settings/user-profile', (req, res) => {
   const displayName = normalizeOptionalString(req.body?.displayName) || '我';
-  const avatarUrl = normalizeOptionalString(req.body?.avatarUrl);
+  const avatarUrl = normalizeAvatarValue(req.body?.avatarUrl);
 
   try {
     const next = {
@@ -232,7 +243,13 @@ app.patch('/api/openclaw-webchat/settings/user-profile', (req, res) => {
       updatedAt: new Date().toISOString()
     };
     writeJson(USER_PROFILE_FILE, next);
-    res.json({ ok: true, userProfile: next });
+    res.json({
+      ok: true,
+      userProfile: {
+        ...next,
+        avatarUrl: presentAvatarUrl(next.avatarUrl)
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: formatError(error) });
   }
@@ -1594,17 +1611,21 @@ function signMediaToken(filePath) {
   return Buffer.from(JSON.stringify({ payload, sig })).toString('base64url');
 }
 
-function verifyMediaToken(token) {
+function decodeMediaToken(token, { ignoreExpiration = false } = {}) {
   try {
     const decoded = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
     const payloadJson = JSON.stringify(decoded.payload);
     const expectedSig = crypto.createHmac('sha256', MEDIA_SECRET).update(payloadJson).digest('hex');
     if (decoded.sig !== expectedSig) return null;
-    if (!decoded.payload?.exp || Date.now() > decoded.payload.exp) return null;
+    if (!ignoreExpiration && (!decoded.payload?.exp || Date.now() > decoded.payload.exp)) return null;
     return decoded.payload;
   } catch {
     return null;
   }
+}
+
+function verifyMediaToken(token) {
+  return decodeMediaToken(token);
 }
 
 function isAllowedMediaPath(filePath) {
@@ -1615,6 +1636,50 @@ function isAllowedMediaPath(filePath) {
     home
   ];
   return allowedRoots.some((root) => normalized.startsWith(root));
+}
+
+function normalizeAvatarValue(value) {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) return null;
+
+  const mediaPath = decodeAvatarMediaPath(normalized);
+  if (mediaPath) return mediaPath;
+  return normalized;
+}
+
+function presentAvatarUrl(value) {
+  const normalized = normalizeAvatarValue(value);
+  if (!normalized) return null;
+
+  if (normalized.startsWith('/')) {
+    const resolved = path.resolve(normalized);
+    if (!isAllowedMediaPath(resolved) || !fs.existsSync(resolved)) return null;
+    const token = signMediaToken(resolved);
+    return `/api/openclaw-webchat/media?token=${encodeURIComponent(token)}`;
+  }
+
+  return normalized;
+}
+
+function decodeAvatarMediaPath(value) {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) return null;
+  if (!normalized.includes('/api/openclaw-webchat/media')) return null;
+
+  try {
+    const parsed = normalized.startsWith('http://') || normalized.startsWith('https://')
+      ? new URL(normalized)
+      : new URL(normalized, 'http://localhost');
+    if (parsed.pathname !== '/api/openclaw-webchat/media') return null;
+    const token = parsed.searchParams.get('token');
+    if (!token) return null;
+    const payload = decodeMediaToken(token, { ignoreExpiration: true });
+    if (!payload?.path) return null;
+    const resolved = path.resolve(payload.path);
+    return isAllowedMediaPath(resolved) ? resolved : null;
+  } catch {
+    return null;
+  }
 }
 
 function historyFile(agentId) {

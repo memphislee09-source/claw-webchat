@@ -1733,7 +1733,7 @@ async function saveSettingsContact() {
     if (state.settingsDraftAvatarFile) {
       showStatus('正在上传头像…', 'info');
       const upload = await uploadSettingsAvatar(state.settingsDraftAvatarFile, target);
-      avatarUrl = upload?.block?.url || avatarUrl;
+      avatarUrl = upload?.upload?.source || avatarUrl;
     }
 
     if (target.kind === 'user') {

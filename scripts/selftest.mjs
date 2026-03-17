@@ -7,9 +7,13 @@ const base = process.env.OPENCLAW_WEBCHAT_BASE || 'http://127.0.0.1:3770';
 const agentId = process.env.OPENCLAW_WEBCHAT_TEST_AGENT || 'mira';
 const sessionKey = `openclaw-webchat:${agentId}`;
 const defaultBindingsFile = fileURLToPath(new URL('../data/session-bindings.json', import.meta.url));
+const defaultProfilesFile = fileURLToPath(new URL('../data/agent-profiles.json', import.meta.url));
 const bindingsFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
   ? path.join(path.resolve(process.env.OPENCLAW_WEBCHAT_DATA_DIR), 'session-bindings.json')
   : defaultBindingsFile;
+const profilesFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
+  ? path.join(path.resolve(process.env.OPENCLAW_WEBCHAT_DATA_DIR), 'agent-profiles.json')
+  : defaultProfilesFile;
 
 const unique = `selftest-${Date.now()}`;
 
@@ -178,11 +182,24 @@ async function checkAgents() {
 }
 
 async function checkAgentProfile() {
+  const upload = await postJson('/api/openclaw-webchat/uploads', {
+    kind: 'image',
+    filename: 'agent-avatar.png',
+    mimeType: 'image/png',
+    contentBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2W2i8AAAAASUVORK5CYII='
+  });
+  assert(upload?.upload?.source, 'agent avatar upload should return persistent source');
+  assert(upload?.block?.url?.includes('/api/openclaw-webchat/media?token='), 'agent avatar upload should return a signed media url');
+
   const patched = await patchJson(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/profile`, {
     displayName: 'Selftest Agent',
-    avatarUrl: null
+    avatarUrl: upload.block.url
   });
   assert(patched?.profile?.displayName === 'Selftest Agent', 'agent profile patch should persist displayName');
+  assert(patched?.profile?.avatarUrl?.includes('/api/openclaw-webchat/media?token='), 'agent profile response should expose a refreshed signed media url');
+
+  const profiles = JSON.parse(fs.readFileSync(profilesFile, 'utf8'));
+  assert(profiles?.[agentId]?.avatarUrl === upload.upload.source, 'agent profile should persist stable avatar source instead of signed url');
 }
 
 async function checkOpenAgent() {
