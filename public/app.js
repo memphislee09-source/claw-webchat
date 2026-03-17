@@ -4,7 +4,7 @@ const THEME_STORAGE_KEY = 'openclaw-webchat-theme-choice';
 const LEGACY_THEME_MODE_STORAGE_KEY = 'openclaw-webchat-theme-mode';
 const THEME_PRESETS = {
   dark: { name: '深色', mode: 'dark', hint: '夜间更稳，更适合低光环境。' },
-  'light-paper': { name: 'Paper Gray', mode: 'light', hint: '纸感灰白，背景退得最远。' },
+  'light-paper': { name: 'Dawn Peach', mode: 'light', hint: '顶部带一点杏桃暖光，保留轻微色彩变化。' },
   'light-linen': { name: 'Warm Linen', mode: 'light', hint: '微暖的亚麻纸感，柔和但不显脏。' },
   'light-mist': { name: 'Mist Blue', mode: 'light', hint: '偏冷静的蓝灰，工具感更强。' },
   'light-sand': { name: 'Soft Sand', mode: 'light', hint: '最放松的浅暖中性，存在感很轻。' }
