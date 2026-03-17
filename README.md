@@ -3,15 +3,15 @@
 OpenClaw WebChat 项目仓库。
 
 ## 当前版本
-- 发布版本：`0.1.1`
-- 包版本：`0.1.1`
+- 发布版本：`0.1.2`
+- 包版本：`0.1.2`
 
 ## 项目目标
 构建可扩展、可维护的 WebChat 客户端，为 OpenClaw 提供稳定的对话交互体验。
 
 ## 当前阶段
-- 阶段：`0.1.1` 基线已完成；实验分支继续验证视觉媒体气泡等宽方案
-- 当前重点：媒体异常态细节、视觉媒体气泡效果对比、移动端与多 agent 回归
+- 阶段：`0.1.2` 已合入 `main`，作为后续开发基点继续演进
+- 当前重点：移动端历史加载稳定性、视觉媒体气泡方案收口、多 agent / 迟到回包回归、音频转写成功链路验收
 
 ## 本地运行
 ```bash
@@ -19,6 +19,22 @@ npm install
 npm start
 # 默认监听 http://localhost:3770
 ```
+
+## 常驻运行
+已提供 launchd 启动脚本：
+
+```bash
+scripts/run-webchat-launchd.sh
+```
+
+推荐以用户级 LaunchAgent `ai.openclaw.webchat` 常驻运行，日志写入：
+- `~/.openclaw/logs/webchat.log`
+- `~/.openclaw/logs/webchat.err.log`
+
+说明：
+- WebChat 自身会常驻监听 `3770` 端口；
+- 它在每次请求时调用 `openclaw` CLI，因此即使 OpenClaw / gateway 重启，WebChat 进程保持常驻即可继续服务；
+- launchd `KeepAlive` 会在 WebChat 异常退出后自动拉起。
 
 ## 自测
 ```bash
@@ -48,7 +64,8 @@ npm run selftest
 - 图片直接嵌入气泡，支持单击全屏、缩放与平移
 - 视频直接嵌入气泡，使用原生播放器控件处理全屏
 - 对话气泡支持常用 Markdown 渲染（标题、列表、引用、代码块、链接、粗斜体）
-- 实验分支支持图片 / 视频图文气泡等宽显示：气泡宽度跟随媒体实际显示宽度，桌面端最大 `70vw`
+- 当前版本支持图片 / 视频图文气泡等宽显示：气泡宽度跟随媒体实际显示宽度，桌面端最大 `70vw`
+- 已收紧视觉媒体气泡启用条件：纯媒体或短图注消息使用等宽气泡，长正文图文混排在桌面端回退为常规宽气泡
 - 发送后立即清空输入框；agent 处理期间显示头像 + 动态处理中指示
 - 左右聊天头像尺寸统一
 - 可视化设置页支持统一联系人管理、头像本地裁剪上传与可收起的展开式设置分区
@@ -59,7 +76,8 @@ npm run selftest
 - `docs/PROJECT_CHARTER.md`：项目章程（范围/目标/边界）
 - `docs/ARCHITECTURE.md`：架构草案
 - `docs/ROADMAP.md`：里程碑与迭代节奏
-- `docs/HANDOFF-2026-03-15.md`：最新交接摘要与下一步建议
+- `docs/HANDOFF-2026-03-17.md`：最新交接摘要与下一步建议
+- `docs/HANDOFF-2026-03-15.md`：上一轮交接记录
 - `docs/error.md`：错误与修复记录
 
 ## 协作约定

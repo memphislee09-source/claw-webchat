@@ -73,6 +73,9 @@ async function checkPageShell() {
   assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
   assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
+  assert(css.includes('.message-list > :first-child'), 'styles.css should use first-child auto margin for bottom anchoring');
+  assert(css.includes('#headerRefreshButton'), 'styles.css should include mobile header refresh hiding rule');
+  assert(css.includes('.chat-subtitle'), 'styles.css should include mobile subtitle hiding rule');
   assert(css.includes('.pending-upload'), 'styles.css should include pending upload styles');
   assert(css.includes('.settings-panel'), 'styles.css should include settings panel styles');
   assert(css.includes('.settings-accordion'), 'styles.css should include accordion settings layout styles');
@@ -186,6 +189,7 @@ async function checkOpenAgent() {
   const payload = await postJson(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/open`, {});
   assert(payload?.sessionKey === sessionKey, 'open should return expected sessionKey');
   assert(payload?.history && Array.isArray(payload.history.messages), 'open should return history page');
+  assert(payload.history.messages.length <= 15, 'open should return the reduced initial history page');
 }
 
 async function checkSlashCommands() {

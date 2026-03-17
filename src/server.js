@@ -22,6 +22,7 @@ const HISTORY_DIR = path.join(DATA_DIR, 'history');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const MEDIA_SECRET = process.env.OPENCLAW_WEBCHAT_MEDIA_SECRET || 'openclaw-webchat-local-secret';
 const HISTORY_PAGE_LIMIT_MAX = 200;
+const HISTORY_OPEN_PAGE_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_OPEN_PAGE_LIMIT || 15);
 const NAMESPACE = 'openclaw-webchat';
 const BOOTSTRAP_VERSION = '2026-03-16.phase2';
 const ACTIVE_RECENT_WINDOW_MS = 5 * 60 * 1000;
@@ -130,7 +131,7 @@ app.post('/api/openclaw-webchat/agents/:agentId/open', async (req, res) => {
 
     const hydrated = await ensureBootstrapInjected(binding);
 
-    const { messages, nextBefore, hasMore } = getHistoryPage({ agentId, limit: 30, before: null });
+    const { messages, nextBefore, hasMore } = getHistoryPage({ agentId, limit: HISTORY_OPEN_PAGE_LIMIT, before: null });
     res.json({
       agentId,
       sessionKey: hydrated.sessionKey,

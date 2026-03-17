@@ -360,8 +360,8 @@ function renderMessages() {
     bubble.className = 'message-bubble';
 
     const blocks = Array.isArray(message.blocks) ? message.blocks : [];
-    const hasVisualMediaBlock = blocks.some((block) => block.type === 'image' || block.type === 'video');
-    if (hasVisualMediaBlock) {
+    const useVisualMediaBubble = shouldUseVisualMediaBubble(blocks);
+    if (useVisualMediaBubble) {
       row.classList.add('visual-media-row');
       bubble.classList.add('visual-media-bubble');
     }
@@ -577,6 +577,21 @@ function syncVisualBubbleWidth(bubble) {
   bubble.querySelectorAll('.message-image-button, .message-video-shell').forEach((wrapper) => {
     wrapper.style.setProperty('--visual-media-width', `${width}px`);
   });
+}
+
+function shouldUseVisualMediaBubble(blocks) {
+  const normalizedBlocks = Array.isArray(blocks) ? blocks : [];
+  const visualMediaCount = normalizedBlocks.filter((block) => block?.type === 'image' || block?.type === 'video').length;
+  if (!visualMediaCount) return false;
+
+  const totalTextLength = normalizedBlocks.reduce((sum, block) => {
+    if (block?.type !== 'text') return sum;
+    return sum + String(block.text || '').trim().length;
+  }, 0);
+
+  if (totalTextLength === 0) return true;
+
+  return totalTextLength <= 220;
 }
 
 async function loadOlderHistory() {

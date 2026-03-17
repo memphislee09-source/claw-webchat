@@ -364,10 +364,13 @@ button {
   padding: 12px 24px 24px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 16px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
+}
+
+.message-list > :first-child {
+  margin-top: auto;
 }
 
 .empty-state {
@@ -1261,6 +1264,11 @@ button {
   .command-menu {
     right: auto;
     left: 0;
+  }
+
+  .chat-subtitle,
+  #headerRefreshButton {
+    display: none;
   }
 
   .message-row.visual-media-row {
