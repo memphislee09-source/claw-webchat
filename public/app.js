@@ -1,5 +1,7 @@
 import { groupMessageBlocksForRender } from './message-blocks.js';
 
+const THEME_MODE_STORAGE_KEY = 'openclaw-webchat-theme-mode';
+
 const state = {
   agents: [],
   activeAgentId: null,
@@ -32,6 +34,7 @@ const state = {
   mediaViewerDragStartX: 0,
   mediaViewerDragStartY: 0,
   mediaViewerMoved: false,
+  themeMode: 'dark',
   userProfile: {
     displayName: '我',
     avatarUrl: null
@@ -75,12 +78,17 @@ const settingsChooseAvatarButtonEl = document.getElementById('settingsChooseAvat
 const settingsClearAvatarButtonEl = document.getElementById('settingsClearAvatarButton');
 const settingsAvatarHintEl = document.getElementById('settingsAvatarHint');
 const saveSettingsButtonEl = document.getElementById('saveSettingsButton');
+const settingsThemeModeButtonsEl = document.getElementById('settingsThemeModeButtons');
+const settingsThemeHintEl = document.getElementById('settingsThemeHint');
 const mediaViewerEl = document.getElementById('mediaViewer');
 const mediaViewerImageEl = document.getElementById('mediaViewerImage');
 const mediaZoomOutButtonEl = document.getElementById('mediaZoomOutButton');
 const mediaResetZoomButtonEl = document.getElementById('mediaResetZoomButton');
 const mediaZoomInButtonEl = document.getElementById('mediaZoomInButton');
 const appShellEl = document.querySelector('.app-shell');
+
+state.themeMode = getStoredThemeMode();
+applyThemeMode(state.themeMode);
 
 boot().catch((error) => showStatus(`初始化失败：${formatError(error)}`, 'error'));
 
@@ -129,6 +137,7 @@ function bindEvents() {
   settingsClearAvatarButtonEl.addEventListener('click', clearSettingsAvatarDraft);
   settingsAvatarFileInputEl.addEventListener('change', handleSettingsAvatarSelection);
   saveSettingsButtonEl.addEventListener('click', saveSettingsContact);
+  settingsThemeModeButtonsEl?.addEventListener('click', handleThemeModeButtonClick);
   mediaViewerEl.addEventListener('click', closeMediaViewer);
   mediaViewerEl.addEventListener('wheel', handleMediaViewerWheel, { passive: false });
   mediaViewerImageEl.addEventListener('click', handleMediaViewerImageClick);
@@ -168,6 +177,54 @@ async function loadSettings() {
   }
 
   populateSettingsForm();
+}
+
+function getStoredThemeMode() {
+  try {
+    const stored = localStorage.getItem(THEME_MODE_STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // ignore storage errors
+  }
+
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function applyThemeMode(mode) {
+  const next = mode === 'light' ? 'light' : 'dark';
+  state.themeMode = next;
+  document.documentElement.dataset.theme = next;
+  document.documentElement.style.colorScheme = next;
+  renderThemeModeControls();
+}
+
+function persistThemeMode(mode) {
+  applyThemeMode(mode);
+  try {
+    localStorage.setItem(THEME_MODE_STORAGE_KEY, state.themeMode);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function handleThemeModeButtonClick(event) {
+  const button = event.target.closest('[data-theme-mode]');
+  if (!button) return;
+  persistThemeMode(button.dataset.themeMode);
+}
+
+function renderThemeModeControls() {
+  if (!settingsThemeModeButtonsEl) return;
+
+  settingsThemeModeButtonsEl.querySelectorAll('[data-theme-mode]').forEach((button) => {
+    const active = button.dataset.themeMode === state.themeMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+
+  if (settingsThemeHintEl) {
+    settingsThemeHintEl.textContent = `当前使用${state.themeMode === 'light' ? '浅色' : '深色'}模式，主题偏好会保存在当前浏览器。`;
+  }
 }
 
 async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) {
@@ -1536,6 +1593,7 @@ function toggleSettingsPanel(open) {
   settingsPanelEl.setAttribute('aria-hidden', state.settingsOpen ? 'false' : 'true');
   if (state.settingsOpen) {
     state.settingsExpandedSection = null;
+    renderThemeModeControls();
     populateSettingsForm({ resetDraft: true });
   } else {
     resetSettingsAvatarDraft();
@@ -1544,6 +1602,7 @@ function toggleSettingsPanel(open) {
 
 function populateSettingsForm({ resetDraft = false } = {}) {
   renderSettingsTabs();
+  renderThemeModeControls();
   renderSettingsContactOptions();
 
   const currentKey = resolveValidSettingsContactKey(state.settingsSelectedContactKey);

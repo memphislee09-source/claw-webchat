@@ -53,6 +53,9 @@ async function checkPageShell() {
   assert(html.includes('id="settingsContactSelect"'), 'page should contain settingsContactSelect');
   assert(html.includes('id="saveSettingsButton"'), 'page should contain saveSettingsButton');
   assert(html.includes('id="settingsPreferencesSection"'), 'page should contain settingsPreferencesSection');
+  assert(html.includes('id="settingsThemeModeButtons"'), 'page should contain theme mode switch');
+  assert(html.includes('id="settingsThemeLightButton"'), 'page should contain light theme button');
+  assert(html.includes('id="settingsThemeDarkButton"'), 'page should contain dark theme button');
   assert(html.includes('id="mediaViewer"'), 'page should contain mediaViewer');
   assert(html.includes('id="mediaViewerImage"'), 'page should contain mediaViewerImage');
 
@@ -64,6 +67,8 @@ async function checkPageShell() {
   assert(appJs.includes('async function cropAvatarToSquare'), 'app.js should include avatar crop flow');
   assert(appJs.includes('function openMediaViewer'), 'app.js should include image viewer flow');
   assert(appJs.includes('async function loadCommandCatalog'), 'app.js should include slash command catalog loading');
+  assert(appJs.includes('function applyThemeMode'), 'app.js should include theme mode application');
+  assert(appJs.includes('function persistThemeMode'), 'app.js should include theme mode persistence');
   assert(appJs.includes('function renderCommandMenu'), 'app.js should include slash command menu rendering');
   assert(appJs.includes('async function executeSlashCommand'), 'app.js should include slash command execution');
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
@@ -83,6 +88,8 @@ async function checkPageShell() {
   assert(css.includes('.pending-upload'), 'styles.css should include pending upload styles');
   assert(css.includes('.settings-panel'), 'styles.css should include settings panel styles');
   assert(css.includes('.settings-accordion'), 'styles.css should include accordion settings layout styles');
+  assert(css.includes('.theme-mode-switch'), 'styles.css should include theme mode switch styles');
+  assert(css.includes(':root[data-theme="light"]'), 'styles.css should include light theme tokens');
   assert(css.includes('.media-viewer'), 'styles.css should include media viewer styles');
 }
 

@@ -1,4 +1,5 @@
-:root {
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0b1020;
   --panel: #0f172a;
@@ -14,7 +15,85 @@
   --success-soft: rgba(34, 197, 94, 0.16);
   --danger: #ef4444;
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  --bg-gradient: radial-gradient(circle at top, #18213f 0%, #0b1020 55%);
+  --sidebar-bg: rgba(6, 10, 20, 0.82);
+  --surface-1: rgba(255, 255, 255, 0.03);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-3: rgba(255, 255, 255, 0.04);
+  --surface-4: rgba(11, 16, 32, 0.72);
+  --surface-5: rgba(255, 255, 255, 0.08);
+  --brand-soft: rgba(59, 130, 246, 0.12);
+  --brand-soft-strong: rgba(59, 130, 246, 0.14);
+  --button-active-text: #bfdbfe;
+  --code-inline-bg: rgba(255, 255, 255, 0.08);
+  --code-block-bg: rgba(2, 6, 16, 0.7);
+  --code-block-border: rgba(255, 255, 255, 0.08);
+  --link: #93c5fd;
+  --link-user: #dbeafe;
+  --command-menu-bg:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(11, 16, 32, 0.98)),
+    rgba(11, 16, 32, 0.96);
+  --command-menu-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  --command-title: rgba(191, 219, 254, 0.72);
+  --settings-panel-bg:
+    linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(10, 15, 28, 0.98)),
+    rgba(15, 23, 42, 0.96);
+  --composer-bg: linear-gradient(180deg, rgba(11, 16, 32, 0.2), rgba(11, 16, 32, 0.8));
+  --sidebar-backdrop: rgba(0, 0, 0, 0.45);
+  --settings-backdrop: rgba(3, 6, 14, 0.58);
+  --viewer-bg: rgba(2, 6, 16, 0.96);
+  --danger-soft-bg: rgba(239, 68, 68, 0.08);
+  --danger-text: #fecaca;
+  --audio-pill-text: #d1fae5;
   font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #edf3f6;
+  --panel: #fbfcfd;
+  --panel-2: #f5f8fb;
+  --muted: #627289;
+  --line: rgba(31, 52, 84, 0.13);
+  --line-strong: rgba(31, 52, 84, 0.22);
+  --text: #172131;
+  --text-soft: #31415b;
+  --brand: #2b65d9;
+  --brand-2: #1f4fb3;
+  --success: #0f9f6b;
+  --success-soft: rgba(15, 159, 107, 0.14);
+  --danger: #d64c4c;
+  --shadow: 0 18px 50px rgba(46, 67, 100, 0.14);
+  --bg-gradient: radial-gradient(circle at top, #f5dcc0 0%, #edf3f6 56%);
+  --sidebar-bg: rgba(249, 251, 253, 0.9);
+  --surface-1: rgba(255, 255, 255, 0.68);
+  --surface-2: rgba(255, 255, 255, 0.9);
+  --surface-3: rgba(255, 255, 255, 0.76);
+  --surface-4: rgba(239, 244, 248, 0.88);
+  --surface-5: rgba(255, 255, 255, 0.86);
+  --brand-soft: rgba(43, 101, 217, 0.12);
+  --brand-soft-strong: rgba(43, 101, 217, 0.16);
+  --button-active-text: #1f4fb3;
+  --code-inline-bg: rgba(43, 101, 217, 0.1);
+  --code-block-bg: rgba(246, 249, 252, 0.96);
+  --code-block-border: rgba(31, 52, 84, 0.12);
+  --link: #2357c2;
+  --link-user: #1f4fb3;
+  --command-menu-bg:
+    linear-gradient(180deg, rgba(252, 253, 254, 0.97), rgba(244, 248, 251, 0.99)),
+    rgba(249, 251, 253, 0.98);
+  --command-menu-shadow: 0 26px 60px rgba(46, 67, 100, 0.16);
+  --command-title: rgba(43, 101, 217, 0.82);
+  --settings-panel-bg:
+    linear-gradient(180deg, rgba(252, 253, 254, 0.98), rgba(245, 248, 252, 0.99)),
+    rgba(249, 251, 253, 0.98);
+  --composer-bg: linear-gradient(180deg, rgba(237, 243, 246, 0.36), rgba(237, 243, 246, 0.95));
+  --sidebar-backdrop: rgba(21, 32, 48, 0.16);
+  --settings-backdrop: rgba(21, 32, 48, 0.24);
+  --viewer-bg: rgba(11, 18, 29, 0.94);
+  --danger-soft-bg: rgba(214, 76, 76, 0.1);
+  --danger-text: #ab3636;
+  --audio-pill-text: #0b6e58;
 }
 
 * {
@@ -30,7 +109,7 @@ body {
   margin: 0;
   min-height: 100%;
   height: 100%;
-  background: radial-gradient(circle at top, #18213f 0%, #0b1020 55%);
+  background: var(--bg-gradient);
   color: var(--text);
   overflow: hidden;
 }
@@ -59,7 +138,7 @@ button {
 
 .sidebar {
   border-right: 1px solid var(--line);
-  background: rgba(6, 10, 20, 0.82);
+  background: var(--sidebar-bg);
   backdrop-filter: blur(16px);
   padding: 20px 16px 16px;
   display: flex;
@@ -137,7 +216,7 @@ button {
 .agent-card {
   width: 100%;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border-radius: 18px;
   padding: 12px;
   color: inherit;
@@ -151,12 +230,12 @@ button {
 
 .agent-card:hover {
   border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
 }
 
 .agent-card.active {
   border-color: rgba(59, 130, 246, 0.5);
-  background: rgba(59, 130, 246, 0.12);
+  background: var(--brand-soft);
 }
 
 .agent-avatar,
@@ -241,8 +320,8 @@ button {
   height: 10px;
   border-radius: 999px;
   flex: none;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-5);
+  border: 1px solid var(--line-strong);
 }
 
 .presence-dot.running {
@@ -257,7 +336,7 @@ button {
 }
 
 .presence-dot.idle {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--surface-5);
 }
 
 .settings-entry,
@@ -268,7 +347,7 @@ button {
 .settings-field select {
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-3);
   color: inherit;
 }
 
@@ -329,7 +408,7 @@ button {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: rgba(11, 16, 32, 0.72);
+  background: var(--surface-4);
 }
 
 .chat-header-left,
@@ -379,7 +458,7 @@ button {
   border: 1px dashed var(--line-strong);
   border-radius: 24px;
   padding: 28px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
 }
 
 .message-row {
@@ -429,7 +508,7 @@ button {
   border-radius: 20px;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -538,15 +617,15 @@ button {
   font-size: 0.92em;
   border-radius: 8px;
   padding: 0.14em 0.42em;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--code-inline-bg);
 }
 
 .markdown-content pre {
   overflow: auto;
   border-radius: 16px;
   padding: 12px 14px;
-  background: rgba(2, 6, 16, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--code-block-bg);
+  border: 1px solid var(--code-block-border);
 }
 
 .markdown-content pre code {
@@ -559,18 +638,18 @@ button {
 }
 
 .markdown-content a {
-  color: #93c5fd;
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 0.16em;
 }
 
 .message-row.user .markdown-content a {
-  color: #dbeafe;
+  color: var(--link-user);
 }
 
 .markdown-content hr {
   border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--line);
 }
 
 .message-media {
@@ -602,7 +681,7 @@ button {
   max-height: min(60vh, 520px);
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   object-fit: contain;
 }
 
@@ -640,7 +719,7 @@ button {
   gap: 10px;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   padding: 12px;
 }
 
@@ -665,14 +744,14 @@ button {
 
 .media-note {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  background: var(--surface-3);
   padding: 10px 12px;
 }
 
 .media-note.warning {
   border-color: rgba(239, 68, 68, 0.24);
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-soft-bg);
 }
 
 .media-note-body {
@@ -688,7 +767,7 @@ button {
 .loading-chip {
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-3);
 }
 
 .file-card,
@@ -706,7 +785,7 @@ button {
 
 .invalid-card {
   border-color: rgba(239, 68, 68, 0.35);
-  color: #fecaca;
+  color: var(--danger-text);
 }
 
 .marker-row {
@@ -736,7 +815,7 @@ button {
   padding: 0 18px;
   border-radius: 20px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -767,7 +846,7 @@ button {
 .composer-wrap {
   border-top: 1px solid var(--line);
   padding: 16px 24px 24px;
-  background: linear-gradient(180deg, rgba(11, 16, 32, 0.2), rgba(11, 16, 32, 0.8));
+  background: var(--composer-bg);
 }
 
 .composer {
@@ -796,15 +875,15 @@ button {
   border-radius: 18px;
   border: 1px solid var(--line);
   background:
-    linear-gradient(135deg, rgba(59, 130, 246, 0.09), rgba(255, 255, 255, 0.03)),
-    rgba(255, 255, 255, 0.03);
+    linear-gradient(135deg, rgba(59, 130, 246, 0.09), var(--surface-1)),
+    var(--surface-1);
   box-shadow: var(--shadow);
 }
 
 .pending-upload.audio {
   background:
     linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.05)),
-    rgba(255, 255, 255, 0.03);
+    var(--surface-1);
 }
 
 .pending-upload-preview,
@@ -825,7 +904,7 @@ button {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #d1fae5;
+  color: var(--audio-pill-text);
   border: 1px solid rgba(16, 185, 129, 0.24);
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.28), rgba(6, 182, 212, 0.18));
 }
@@ -868,7 +947,7 @@ button {
   max-height: 180px;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   color: var(--text);
   padding: 14px 16px;
   line-height: 1.5;
@@ -893,8 +972,8 @@ button {
 
 .command-trigger[aria-expanded="true"] {
   border-color: rgba(59, 130, 246, 0.5);
-  background: rgba(59, 130, 246, 0.14);
-  color: #bfdbfe;
+  background: var(--brand-soft-strong);
+  color: var(--button-active-text);
 }
 
 .command-menu {
@@ -905,10 +984,8 @@ button {
   padding: 12px;
   border-radius: 20px;
   border: 1px solid var(--line-strong);
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(11, 16, 32, 0.98)),
-    rgba(11, 16, 32, 0.96);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  background: var(--command-menu-bg);
+  box-shadow: var(--command-menu-shadow);
   backdrop-filter: blur(18px);
   display: grid;
   gap: 10px;
@@ -925,7 +1002,7 @@ button {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(191, 219, 254, 0.72);
+  color: var(--command-title);
   padding: 2px 6px 0;
 }
 
@@ -934,7 +1011,7 @@ button {
   border: 1px solid transparent;
   border-radius: 16px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   color: inherit;
   text-align: left;
   display: grid;
@@ -945,7 +1022,7 @@ button {
 .command-item:hover,
 .command-item:focus-visible {
   border-color: rgba(59, 130, 246, 0.35);
-  background: rgba(59, 130, 246, 0.12);
+  background: var(--brand-soft);
   outline: none;
   transform: translateY(-1px);
 }
@@ -954,7 +1031,7 @@ button {
   font-family: "SFMono-Regular", ui-monospace, "JetBrains Mono", monospace;
   font-size: 13px;
   font-weight: 700;
-  color: #dbeafe;
+  color: var(--link-user);
 }
 
 .command-item-desc,
@@ -967,7 +1044,7 @@ button {
 .command-menu-empty {
   padding: 10px 12px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
 }
 
 .sidebar-backdrop,
@@ -980,12 +1057,12 @@ button {
 }
 
 .sidebar-backdrop {
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--sidebar-backdrop);
   z-index: 2;
 }
 
 .settings-backdrop {
-  background: rgba(3, 6, 14, 0.58);
+  background: var(--settings-backdrop);
   z-index: 4;
 }
 
@@ -995,9 +1072,7 @@ button {
   right: 0;
   bottom: 0;
   width: min(440px, 100vw);
-  background:
-    linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(10, 15, 28, 0.98)),
-    rgba(15, 23, 42, 0.96);
+  background: var(--settings-panel-bg);
   border-left: 1px solid var(--line);
   box-shadow: var(--shadow);
   transform: translateX(100%);
@@ -1011,7 +1086,7 @@ button {
   position: fixed;
   inset: 0;
   z-index: 7;
-  background: rgba(2, 6, 16, 0.96);
+  background: var(--viewer-bg);
   display: grid;
   place-items: center;
   cursor: zoom-out;
@@ -1033,8 +1108,8 @@ button {
 }
 
 .media-viewer-button {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--surface-5);
+  border-color: var(--line-strong);
 }
 
 .media-viewer-image {
@@ -1091,7 +1166,7 @@ button {
   width: 100%;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   color: var(--muted);
   padding: 14px 16px;
   text-align: left;
@@ -1103,7 +1178,7 @@ button {
 
 .settings-accordion-button.active {
   color: var(--text);
-  background: rgba(59, 130, 246, 0.14);
+  background: var(--brand-soft-strong);
   border-color: rgba(59, 130, 246, 0.4);
 }
 
@@ -1138,7 +1213,7 @@ button {
 .settings-card {
   border-radius: 24px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-3);
   padding: 18px;
   display: grid;
   gap: 14px;
@@ -1146,6 +1221,37 @@ button {
 
 .settings-card-muted {
   opacity: 0.82;
+}
+
+.theme-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.theme-mode-button {
+  min-height: 46px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  color: var(--text-soft);
+  font-weight: 600;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.theme-mode-button:hover,
+.theme-mode-button:focus-visible {
+  border-color: rgba(59, 130, 246, 0.36);
+  background: var(--surface-2);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.theme-mode-button.active {
+  border-color: rgba(59, 130, 246, 0.44);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(37, 99, 235, 0.12));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08);
 }
 
 .settings-avatar-preview {

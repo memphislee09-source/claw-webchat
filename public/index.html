@@ -4,7 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>openclaw-webchat</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260316-history5" />
+    <script>
+      (() => {
+        try {
+          const key = 'openclaw-webchat-theme-mode';
+          const stored = localStorage.getItem(key);
+          const next = stored === 'light' ? 'light' : 'dark';
+          document.documentElement.dataset.theme = next;
+          document.documentElement.style.colorScheme = next;
+        } catch {
+          document.documentElement.dataset.theme = 'dark';
+          document.documentElement.style.colorScheme = 'dark';
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260317-theme1" />
   </head>
   <body>
     <div class="app-shell">
@@ -151,20 +165,22 @@
               <div class="settings-accordion-panel" id="settingsPreferencesSection" data-settings-panel="preferences" hidden>
                 <div class="settings-section">
                   <div class="settings-section-title">偏好</div>
-                  <p class="settings-section-copy">这里预留后续扩展位，后面可以继续接入语种、主题、消息密度等工作区级设置。</p>
+                  <p class="settings-section-copy">这里开始承载工作区级偏好设置。主题模式已经可用，后续可以继续接入语种、消息密度等偏好项。</p>
 
-                  <div class="settings-card settings-card-muted">
+                  <div class="settings-card">
+                    <div class="settings-field">
+                      <span>主题模式</span>
+                      <div class="theme-mode-switch" id="settingsThemeModeButtons" role="group" aria-label="主题模式切换">
+                        <button class="theme-mode-button" id="settingsThemeDarkButton" type="button" data-theme-mode="dark" aria-pressed="false">深色</button>
+                        <button class="theme-mode-button" id="settingsThemeLightButton" type="button" data-theme-mode="light" aria-pressed="false">浅色</button>
+                      </div>
+                      <div class="settings-field-hint" id="settingsThemeHint">主题偏好会保存在当前浏览器。</div>
+                    </div>
+
                     <label class="settings-field">
                       <span>界面语种</span>
                       <select disabled>
                         <option>简体中文（即将开放）</option>
-                      </select>
-                    </label>
-
-                    <label class="settings-field">
-                      <span>主题模式</span>
-                      <select disabled>
-                        <option>跟随系统 / Dark Mode（即将开放）</option>
                       </select>
                     </label>
 
@@ -191,6 +207,6 @@
       <div class="message-text"></div>
     </template>
 
-    <script type="module" src="/static/app.js?v=20260316-history5"></script>
+    <script type="module" src="/static/app.js?v=20260317-theme1"></script>
   </body>
 </html>
