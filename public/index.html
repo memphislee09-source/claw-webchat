@@ -6,19 +6,30 @@
     <title>openclaw-webchat</title>
     <script>
       (() => {
+        const nextThemeChoice = (stored) => {
+          if (stored === 'dark') return 'dark';
+          if (stored === 'light-paper') return 'light-paper';
+          if (stored === 'light-linen') return 'light-linen';
+          if (stored === 'light-mist') return 'light-mist';
+          if (stored === 'light-sand') return 'light-sand';
+          if (stored === 'light') return 'light-paper';
+          return 'dark';
+        };
+
         try {
-          const key = 'openclaw-webchat-theme-mode';
-          const stored = localStorage.getItem(key);
-          const next = stored === 'light' ? 'light' : 'dark';
+          const key = 'openclaw-webchat-theme-choice';
+          const legacyKey = 'openclaw-webchat-theme-mode';
+          const stored = localStorage.getItem(key) || localStorage.getItem(legacyKey);
+          const next = nextThemeChoice(stored);
           document.documentElement.dataset.theme = next;
-          document.documentElement.style.colorScheme = next;
+          document.documentElement.style.colorScheme = next === 'dark' ? 'dark' : 'light';
         } catch {
           document.documentElement.dataset.theme = 'dark';
           document.documentElement.style.colorScheme = 'dark';
         }
       })();
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260317-theme1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260317-theme2" />
   </head>
   <body>
     <div class="app-shell">
@@ -169,10 +180,72 @@
 
                   <div class="settings-card">
                     <div class="settings-field">
-                      <span>主题模式</span>
-                      <div class="theme-mode-switch" id="settingsThemeModeButtons" role="group" aria-label="主题模式切换">
-                        <button class="theme-mode-button" id="settingsThemeDarkButton" type="button" data-theme-mode="dark" aria-pressed="false">深色</button>
-                        <button class="theme-mode-button" id="settingsThemeLightButton" type="button" data-theme-mode="light" aria-pressed="false">浅色</button>
+                      <span>界面主题</span>
+                      <div class="theme-preset-grid" id="settingsThemePresetButtons" role="group" aria-label="界面主题选择">
+                        <button class="theme-preset-card" id="settingsThemeDarkButton" type="button" data-theme-choice="dark" aria-pressed="false">
+                          <span class="theme-preset-header">
+                            <span class="theme-preset-name">深色</span>
+                            <span class="theme-preset-tag">默认</span>
+                          </span>
+                          <span class="theme-preset-preview theme-preview-dark" aria-hidden="true">
+                            <span class="theme-preview-sidebar"></span>
+                            <span class="theme-preview-panel"></span>
+                            <span class="theme-preview-bubble"></span>
+                          </span>
+                          <span class="theme-preset-copy">夜间更稳，更适合低光环境。</span>
+                        </button>
+
+                        <button class="theme-preset-card" id="settingsThemePaperButton" type="button" data-theme-choice="light-paper" aria-pressed="false">
+                          <span class="theme-preset-header">
+                            <span class="theme-preset-name">Paper Gray</span>
+                            <span class="theme-preset-tag">A</span>
+                          </span>
+                          <span class="theme-preset-preview theme-preview-paper" aria-hidden="true">
+                            <span class="theme-preview-sidebar"></span>
+                            <span class="theme-preview-panel"></span>
+                            <span class="theme-preview-bubble"></span>
+                          </span>
+                          <span class="theme-preset-copy">最克制，纸感灰白，背景退得最远。</span>
+                        </button>
+
+                        <button class="theme-preset-card" id="settingsThemeLinenButton" type="button" data-theme-choice="light-linen" aria-pressed="false">
+                          <span class="theme-preset-header">
+                            <span class="theme-preset-name">Warm Linen</span>
+                            <span class="theme-preset-tag">B</span>
+                          </span>
+                          <span class="theme-preset-preview theme-preview-linen" aria-hidden="true">
+                            <span class="theme-preview-sidebar"></span>
+                            <span class="theme-preview-panel"></span>
+                            <span class="theme-preview-bubble"></span>
+                          </span>
+                          <span class="theme-preset-copy">微暖的亚麻纸感，柔和但不显脏。</span>
+                        </button>
+
+                        <button class="theme-preset-card" id="settingsThemeMistButton" type="button" data-theme-choice="light-mist" aria-pressed="false">
+                          <span class="theme-preset-header">
+                            <span class="theme-preset-name">Mist Blue</span>
+                            <span class="theme-preset-tag">C</span>
+                          </span>
+                          <span class="theme-preset-preview theme-preview-mist" aria-hidden="true">
+                            <span class="theme-preview-sidebar"></span>
+                            <span class="theme-preview-panel"></span>
+                            <span class="theme-preview-bubble"></span>
+                          </span>
+                          <span class="theme-preset-copy">偏冷静的蓝灰，工具感更强。</span>
+                        </button>
+
+                        <button class="theme-preset-card" id="settingsThemeSandButton" type="button" data-theme-choice="light-sand" aria-pressed="false">
+                          <span class="theme-preset-header">
+                            <span class="theme-preset-name">Soft Sand</span>
+                            <span class="theme-preset-tag">D</span>
+                          </span>
+                          <span class="theme-preset-preview theme-preview-sand" aria-hidden="true">
+                            <span class="theme-preview-sidebar"></span>
+                            <span class="theme-preview-panel"></span>
+                            <span class="theme-preview-bubble"></span>
+                          </span>
+                          <span class="theme-preset-copy">最放松的浅暖中性，存在感很轻。</span>
+                        </button>
                       </div>
                       <div class="settings-field-hint" id="settingsThemeHint">主题偏好会保存在当前浏览器。</div>
                     </div>
@@ -207,6 +280,6 @@
       <div class="message-text"></div>
     </template>
 
-    <script type="module" src="/static/app.js?v=20260317-theme1"></script>
+    <script type="module" src="/static/app.js?v=20260317-theme2"></script>
   </body>
 </html>

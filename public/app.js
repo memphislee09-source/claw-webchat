@@ -1,6 +1,14 @@
 import { groupMessageBlocksForRender } from './message-blocks.js';
 
-const THEME_MODE_STORAGE_KEY = 'openclaw-webchat-theme-mode';
+const THEME_STORAGE_KEY = 'openclaw-webchat-theme-choice';
+const LEGACY_THEME_MODE_STORAGE_KEY = 'openclaw-webchat-theme-mode';
+const THEME_PRESETS = {
+  dark: { name: '深色', mode: 'dark', hint: '夜间更稳，更适合低光环境。' },
+  'light-paper': { name: 'Paper Gray', mode: 'light', hint: '纸感灰白，背景退得最远。' },
+  'light-linen': { name: 'Warm Linen', mode: 'light', hint: '微暖的亚麻纸感，柔和但不显脏。' },
+  'light-mist': { name: 'Mist Blue', mode: 'light', hint: '偏冷静的蓝灰，工具感更强。' },
+  'light-sand': { name: 'Soft Sand', mode: 'light', hint: '最放松的浅暖中性，存在感很轻。' }
+};
 
 const state = {
   agents: [],
@@ -34,7 +42,7 @@ const state = {
   mediaViewerDragStartX: 0,
   mediaViewerDragStartY: 0,
   mediaViewerMoved: false,
-  themeMode: 'dark',
+  themeChoice: 'dark',
   userProfile: {
     displayName: '我',
     avatarUrl: null
@@ -78,7 +86,7 @@ const settingsChooseAvatarButtonEl = document.getElementById('settingsChooseAvat
 const settingsClearAvatarButtonEl = document.getElementById('settingsClearAvatarButton');
 const settingsAvatarHintEl = document.getElementById('settingsAvatarHint');
 const saveSettingsButtonEl = document.getElementById('saveSettingsButton');
-const settingsThemeModeButtonsEl = document.getElementById('settingsThemeModeButtons');
+const settingsThemePresetButtonsEl = document.getElementById('settingsThemePresetButtons');
 const settingsThemeHintEl = document.getElementById('settingsThemeHint');
 const mediaViewerEl = document.getElementById('mediaViewer');
 const mediaViewerImageEl = document.getElementById('mediaViewerImage');
@@ -87,8 +95,8 @@ const mediaResetZoomButtonEl = document.getElementById('mediaResetZoomButton');
 const mediaZoomInButtonEl = document.getElementById('mediaZoomInButton');
 const appShellEl = document.querySelector('.app-shell');
 
-state.themeMode = getStoredThemeMode();
-applyThemeMode(state.themeMode);
+state.themeChoice = getStoredThemeChoice();
+applyThemeChoice(state.themeChoice);
 
 boot().catch((error) => showStatus(`初始化失败：${formatError(error)}`, 'error'));
 
@@ -137,7 +145,7 @@ function bindEvents() {
   settingsClearAvatarButtonEl.addEventListener('click', clearSettingsAvatarDraft);
   settingsAvatarFileInputEl.addEventListener('change', handleSettingsAvatarSelection);
   saveSettingsButtonEl.addEventListener('click', saveSettingsContact);
-  settingsThemeModeButtonsEl?.addEventListener('click', handleThemeModeButtonClick);
+  settingsThemePresetButtonsEl?.addEventListener('click', handleThemePresetClick);
   mediaViewerEl.addEventListener('click', closeMediaViewer);
   mediaViewerEl.addEventListener('wheel', handleMediaViewerWheel, { passive: false });
   mediaViewerImageEl.addEventListener('click', handleMediaViewerImageClick);
@@ -179,51 +187,62 @@ async function loadSettings() {
   populateSettingsForm();
 }
 
-function getStoredThemeMode() {
+function normalizeThemeChoice(choice) {
+  if (choice === 'dark') return 'dark';
+  if (choice === 'light-paper' || choice === 'light-linen' || choice === 'light-mist' || choice === 'light-sand') {
+    return choice;
+  }
+  if (choice === 'light') return 'light-paper';
+  return 'dark';
+}
+
+function getStoredThemeChoice() {
   try {
-    const stored = localStorage.getItem(THEME_MODE_STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark') return stored;
+    const stored = localStorage.getItem(THEME_STORAGE_KEY) || localStorage.getItem(LEGACY_THEME_MODE_STORAGE_KEY);
+    return normalizeThemeChoice(stored);
   } catch {
     // ignore storage errors
   }
 
-  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  return normalizeThemeChoice(document.documentElement.dataset.theme);
 }
 
-function applyThemeMode(mode) {
-  const next = mode === 'light' ? 'light' : 'dark';
-  state.themeMode = next;
+function applyThemeChoice(choice) {
+  const next = normalizeThemeChoice(choice);
+  state.themeChoice = next;
   document.documentElement.dataset.theme = next;
-  document.documentElement.style.colorScheme = next;
-  renderThemeModeControls();
+  document.documentElement.style.colorScheme = THEME_PRESETS[next]?.mode === 'light' ? 'light' : 'dark';
+  renderThemePresetControls();
 }
 
-function persistThemeMode(mode) {
-  applyThemeMode(mode);
+function persistThemeChoice(choice) {
+  applyThemeChoice(choice);
   try {
-    localStorage.setItem(THEME_MODE_STORAGE_KEY, state.themeMode);
+    localStorage.setItem(THEME_STORAGE_KEY, state.themeChoice);
+    localStorage.removeItem(LEGACY_THEME_MODE_STORAGE_KEY);
   } catch {
     // ignore storage errors
   }
 }
 
-function handleThemeModeButtonClick(event) {
-  const button = event.target.closest('[data-theme-mode]');
+function handleThemePresetClick(event) {
+  const button = event.target.closest('[data-theme-choice]');
   if (!button) return;
-  persistThemeMode(button.dataset.themeMode);
+  persistThemeChoice(button.dataset.themeChoice);
 }
 
-function renderThemeModeControls() {
-  if (!settingsThemeModeButtonsEl) return;
+function renderThemePresetControls() {
+  if (!settingsThemePresetButtonsEl) return;
 
-  settingsThemeModeButtonsEl.querySelectorAll('[data-theme-mode]').forEach((button) => {
-    const active = button.dataset.themeMode === state.themeMode;
+  settingsThemePresetButtonsEl.querySelectorAll('[data-theme-choice]').forEach((button) => {
+    const active = button.dataset.themeChoice === state.themeChoice;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
 
   if (settingsThemeHintEl) {
-    settingsThemeHintEl.textContent = `当前使用${state.themeMode === 'light' ? '浅色' : '深色'}模式，主题偏好会保存在当前浏览器。`;
+    const theme = THEME_PRESETS[state.themeChoice] || THEME_PRESETS.dark;
+    settingsThemeHintEl.textContent = `当前使用 ${theme.name}。${theme.hint} 主题偏好会保存在当前浏览器。`;
   }
 }
 
@@ -1593,7 +1612,7 @@ function toggleSettingsPanel(open) {
   settingsPanelEl.setAttribute('aria-hidden', state.settingsOpen ? 'false' : 'true');
   if (state.settingsOpen) {
     state.settingsExpandedSection = null;
-    renderThemeModeControls();
+    renderThemePresetControls();
     populateSettingsForm({ resetDraft: true });
   } else {
     resetSettingsAvatarDraft();
@@ -1602,7 +1621,7 @@ function toggleSettingsPanel(open) {
 
 function populateSettingsForm({ resetDraft = false } = {}) {
   renderSettingsTabs();
-  renderThemeModeControls();
+  renderThemePresetControls();
   renderSettingsContactOptions();
 
   const currentKey = resolveValidSettingsContactKey(state.settingsSelectedContactKey);
