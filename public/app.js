@@ -2,6 +2,8 @@ import { groupMessageBlocksForRender } from './message-blocks.js';
 
 const THEME_STORAGE_KEY = 'openclaw-webchat-theme-choice';
 const LEGACY_THEME_MODE_STORAGE_KEY = 'openclaw-webchat-theme-mode';
+const HISTORY_SEARCH_RECENTS_STORAGE_KEY = 'openclaw-webchat-history-search-recents';
+const HISTORY_SEARCH_MAX_RECENTS = 8;
 const THEME_PRESETS = {
   dark: { name: '深色', mode: 'dark', hint: '夜间更稳，更适合低光环境。' },
   'light-paper': { name: 'Dawn Peach', mode: 'light', hint: '顶部带一点杏桃暖光，保留轻微色彩变化。' },
@@ -26,6 +28,16 @@ const state = {
   openRequestId: 0,
   commandCatalog: [],
   allowedCommands: new Set(),
+  historySearchOpen: false,
+  historySearchQuery: '',
+  historySearchResults: [],
+  historySearchTotal: 0,
+  historySearchLoading: false,
+  historySearchError: '',
+  historySearchActiveMessageId: null,
+  historySearchRequestId: 0,
+  historySearchRecentQueries: [],
+  historySearchShowingRecents: false,
   settingsOpen: false,
   settingsExpandedSection: null,
   settingsSelectedContactKey: null,
@@ -57,6 +69,13 @@ const chatTitleEl = document.getElementById('chatTitle');
 const chatSubtitleEl = document.getElementById('chatSubtitle');
 const chatStatusEl = document.getElementById('chatStatus');
 const headerPresenceEl = document.getElementById('headerPresence');
+const historySearchShellEl = document.getElementById('historySearchShell');
+const historySearchPanelEl = document.getElementById('historySearchPanel');
+const historySearchFormEl = document.getElementById('historySearchForm');
+const historySearchInputEl = document.getElementById('historySearchInput');
+const historySearchSubmitButtonEl = document.getElementById('historySearchSubmitButton');
+const historySearchMetaEl = document.getElementById('historySearchMeta');
+const historySearchResultsEl = document.getElementById('historySearchResults');
 const composerFormEl = document.getElementById('composerForm');
 const composerInputEl = document.getElementById('composerInput');
 const sendButtonEl = document.getElementById('sendButton');
@@ -117,7 +136,10 @@ function bindEvents() {
   composerFormEl.addEventListener('submit', handleSendSubmit);
   newContextButtonEl.addEventListener('click', toggleCommandMenu);
   commandMenuEl?.addEventListener('click', handleCommandMenuClick);
-  document.addEventListener('click', handleOutsideCommandMenuClick);
+  document.addEventListener('click', handleGlobalDocumentClick);
+  historySearchFormEl?.addEventListener('submit', handleHistorySearchSubmit);
+  historySearchInputEl?.addEventListener('focus', handleHistorySearchFocus);
+  historySearchInputEl?.addEventListener('input', handleHistorySearchInput);
   headerRefreshButtonEl.addEventListener('click', () => refreshAgents({ autoOpen: false, refreshCurrent: true }));
   refreshAgentsButtonEl?.addEventListener('click', () => refreshAgents({ autoOpen: false, refreshCurrent: true }));
   attachButtonEl.addEventListener('click', () => mediaUploadInputEl.click());
@@ -225,6 +247,62 @@ function persistThemeChoice(choice) {
     localStorage.removeItem(LEGACY_THEME_MODE_STORAGE_KEY);
   } catch {
     // ignore storage errors
+  }
+}
+
+function getStoredHistorySearchRecentStore() {
+  try {
+    const raw = localStorage.getItem(HISTORY_SEARCH_RECENTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistHistorySearchRecentStore(store) {
+  try {
+    localStorage.setItem(HISTORY_SEARCH_RECENTS_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function normalizeHistorySearchRecentQueries(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, HISTORY_SEARCH_MAX_RECENTS);
+}
+
+function syncHistorySearchRecentQueries(agentId = state.activeAgentId) {
+  if (!agentId) {
+    state.historySearchRecentQueries = [];
+    return;
+  }
+
+  const store = getStoredHistorySearchRecentStore();
+  state.historySearchRecentQueries = normalizeHistorySearchRecentQueries(store[agentId]);
+}
+
+function recordHistorySearchRecentQuery(agentId, query) {
+  const normalized = String(query || '').trim();
+  if (!agentId || !normalized) return;
+
+  const store = getStoredHistorySearchRecentStore();
+  const existing = normalizeHistorySearchRecentQueries(store[agentId]);
+  const next = [
+    normalized,
+    ...existing.filter((item) => item.toLowerCase() !== normalized.toLowerCase())
+  ].slice(0, HISTORY_SEARCH_MAX_RECENTS);
+
+  store[agentId] = next;
+  persistHistorySearchRecentStore(store);
+
+  if (state.activeAgentId === agentId) {
+    state.historySearchRecentQueries = next;
   }
 }
 
@@ -423,10 +501,14 @@ function updateAgentCardIdentity(button, agent) {
 async function openAgent(agentId, { forceReload = false, preserveScrollBottom = false } = {}) {
   if (!agentId) return;
   if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
+  if (state.activeAgentId !== agentId) {
+    resetHistorySearch({ keepOpen: false });
+  }
 
   const requestId = state.openRequestId + 1;
   state.openRequestId = requestId;
   state.activeAgentId = agentId;
+  syncHistorySearchRecentQueries(agentId);
   renderAgentList({ refreshIdentity: false });
   updateHeader();
   populateSettingsForm();
@@ -461,7 +543,299 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   }
 }
 
+function setHistorySearchOpen(open) {
+  state.historySearchOpen = Boolean(open);
+  renderHistorySearchPanel();
+}
+
+function resetHistorySearch({ keepOpen = false } = {}) {
+  state.historySearchRequestId += 1;
+  state.historySearchQuery = '';
+  state.historySearchResults = [];
+  state.historySearchTotal = 0;
+  state.historySearchLoading = false;
+  state.historySearchError = '';
+  state.historySearchActiveMessageId = null;
+  state.historySearchShowingRecents = false;
+  state.historySearchOpen = keepOpen ? state.historySearchOpen : false;
+  if (historySearchInputEl) {
+    historySearchInputEl.value = '';
+  }
+  renderHistorySearchPanel();
+}
+
+function renderHistorySearchPanel() {
+  if (!historySearchPanelEl) return;
+
+  historySearchShellEl?.classList.toggle('active', state.historySearchOpen);
+  historySearchPanelEl.classList.toggle('hidden', !state.historySearchOpen);
+
+  if (historySearchInputEl && historySearchInputEl.value !== state.historySearchQuery) {
+    historySearchInputEl.value = state.historySearchQuery;
+  }
+
+  if (historySearchInputEl) {
+    historySearchInputEl.disabled = !state.activeAgentId;
+    historySearchInputEl.placeholder = state.activeAgentId ? '搜索当前会话历史' : '先打开一个 agent 再搜索';
+  }
+
+  historySearchSubmitButtonEl.disabled = !state.activeAgentId || state.historySearchLoading;
+
+  if (!state.historySearchOpen) return;
+
+  if (!state.activeAgentId) {
+    historySearchMetaEl.textContent = '请先打开一个 agent 会话，再搜索该时间线中的历史消息。';
+  } else if (state.historySearchLoading) {
+    historySearchMetaEl.textContent = '正在搜索当前 agent 的历史消息…';
+  } else if (state.historySearchError) {
+    historySearchMetaEl.textContent = state.historySearchError;
+  } else if (state.historySearchShowingRecents && state.historySearchRecentQueries.length) {
+    historySearchMetaEl.textContent = '';
+  } else if (!state.historySearchQuery) {
+    historySearchMetaEl.textContent = state.historySearchRecentQueries.length
+      ? ''
+      : '输入关键词后即可搜索当前 agent 的主时间线。';
+  } else {
+    historySearchMetaEl.textContent = `已找到 ${state.historySearchTotal} 条命中结果${state.historySearchTotal > state.historySearchResults.length ? `，当前显示前 ${state.historySearchResults.length} 条。` : '。'}`;
+  }
+
+  historySearchResultsEl.innerHTML = '';
+
+  if (state.historySearchShowingRecents && state.historySearchRecentQueries.length) {
+    for (const query of state.historySearchRecentQueries) {
+      historySearchResultsEl.append(createHistorySearchRecentItem(query));
+    }
+    return;
+  }
+
+  if (!state.historySearchQuery) {
+    if (!state.historySearchRecentQueries.length) return;
+    for (const query of state.historySearchRecentQueries) {
+      historySearchResultsEl.append(createHistorySearchRecentItem(query));
+    }
+    return;
+  }
+
+  if (!state.historySearchLoading && !state.historySearchResults.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-search-empty';
+    empty.textContent = '没有找到匹配的历史消息。';
+    historySearchResultsEl.append(empty);
+    return;
+  }
+
+  for (const result of state.historySearchResults) {
+    historySearchResultsEl.append(createHistorySearchResultItem(result));
+  }
+}
+
+function createHistorySearchResultItem(result) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `history-search-result${result.id === state.historySearchActiveMessageId ? ' active' : ''}`;
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    jumpToHistorySearchResult(result.id);
+  });
+
+  const top = document.createElement('div');
+  top.className = 'history-search-result-top';
+
+  const role = document.createElement('div');
+  role.className = 'history-search-role';
+  role.textContent = getHistorySearchResultSpeakerName(result.role);
+
+  const time = document.createElement('div');
+  time.className = 'history-search-time';
+  time.textContent = formatSearchTimestamp(result.createdAt);
+
+  top.append(role, time);
+
+  const excerpt = document.createElement('div');
+  excerpt.className = 'history-search-excerpt';
+  excerpt.textContent = result.excerpt || result.summary || '命中消息';
+
+  button.append(top, excerpt);
+  return button;
+}
+
+function createHistorySearchRecentItem(query) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'history-search-result recent';
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    applyHistorySearchRecentQuery(query);
+  });
+
+  const excerpt = document.createElement('div');
+  excerpt.className = 'history-search-excerpt';
+  excerpt.textContent = query;
+
+  button.append(excerpt);
+  return button;
+}
+
+function getHistorySearchResultSpeakerName(role) {
+  if (role === 'user') {
+    return state.userProfile.displayName || '我';
+  }
+
+  if (role === 'assistant') {
+    const active = getActiveAgent();
+    return active?.name || active?.agentId || 'Assistant';
+  }
+
+  if (role === 'marker') {
+    return '系统标记';
+  }
+
+  return String(role || '消息');
+}
+
+function handleHistorySearchFocus() {
+  if (!state.activeAgentId) return;
+  syncHistorySearchRecentQueries();
+  state.historySearchShowingRecents = state.historySearchRecentQueries.length > 0;
+  setHistorySearchOpen(true);
+}
+
+function applyHistorySearchRecentQuery(query) {
+  if (!historySearchInputEl) return;
+  historySearchInputEl.value = query;
+  state.historySearchQuery = query;
+  state.historySearchShowingRecents = false;
+  executeHistorySearch(query);
+}
+
+function handleHistorySearchInput() {
+  if (!state.activeAgentId) return;
+
+  const query = historySearchInputEl?.value || '';
+  state.historySearchQuery = query;
+  state.historySearchShowingRecents = !query.trim();
+  setHistorySearchOpen(true);
+
+  if (query.trim()) return;
+
+  state.historySearchRequestId += 1;
+  state.historySearchQuery = '';
+  state.historySearchResults = [];
+  state.historySearchTotal = 0;
+  state.historySearchLoading = false;
+  state.historySearchError = '';
+
+  if (state.historySearchActiveMessageId) {
+    state.historySearchActiveMessageId = null;
+    renderMessages();
+  }
+
+  renderHistorySearchPanel();
+}
+
+async function handleHistorySearchSubmit(event) {
+  event.preventDefault();
+  if (!state.activeAgentId) return;
+  setHistorySearchOpen(true);
+
+  const query = historySearchInputEl?.value.trim() || '';
+  state.historySearchShowingRecents = false;
+  await executeHistorySearch(query);
+}
+
+async function executeHistorySearch(query) {
+  const normalizedQuery = String(query || '').trim();
+  state.historySearchQuery = normalizedQuery;
+  state.historySearchError = '';
+  state.historySearchActiveMessageId = null;
+  state.historySearchShowingRecents = false;
+
+  if (!normalizedQuery) {
+    syncHistorySearchRecentQueries();
+    state.historySearchResults = [];
+    state.historySearchTotal = 0;
+    renderHistorySearchPanel();
+    renderMessages();
+    return;
+  }
+
+  const requestId = state.historySearchRequestId + 1;
+  state.historySearchRequestId = requestId;
+  state.historySearchResults = [];
+  state.historySearchTotal = 0;
+  state.historySearchLoading = true;
+  renderHistorySearchPanel();
+
+  try {
+    const payload = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(state.activeAgentId)}/history/search?q=${encodeURIComponent(normalizedQuery)}&limit=20`);
+    if (requestId !== state.historySearchRequestId || !state.activeAgentId) return;
+    state.historySearchResults = Array.isArray(payload?.results) ? payload.results : [];
+    state.historySearchTotal = Number(payload?.total) || state.historySearchResults.length;
+    recordHistorySearchRecentQuery(state.activeAgentId, normalizedQuery);
+  } catch (error) {
+    if (requestId !== state.historySearchRequestId) return;
+    state.historySearchResults = [];
+    state.historySearchTotal = 0;
+    state.historySearchError = `搜索失败：${formatError(error)}`;
+  } finally {
+    if (requestId === state.historySearchRequestId) {
+      state.historySearchLoading = false;
+      renderHistorySearchPanel();
+    }
+  }
+}
+
+async function jumpToHistorySearchResult(messageId) {
+  if (!messageId || !state.activeAgentId) return;
+  showStatus('正在定位命中消息…', 'info');
+
+  const found = await ensureHistoryMessageLoaded(messageId);
+  if (!found) {
+    showStatus('未能定位到该条历史消息。', 'error');
+    return;
+  }
+
+  state.autoScrollPinned = false;
+  state.historySearchActiveMessageId = messageId;
+  renderHistorySearchPanel();
+  renderMessages();
+  requestAnimationFrame(() => {
+    scrollToHistoryMessage(messageId);
+    requestAnimationFrame(() => scrollToHistoryMessage(messageId));
+  });
+  showStatus('已跳转到历史命中消息。', 'success');
+}
+
+async function ensureHistoryMessageLoaded(messageId) {
+  if (state.messages.some((item) => item.id === messageId)) return true;
+  if (!state.activeAgentId) return false;
+
+  const targetAgentId = state.activeAgentId;
+  const targetSessionKey = state.activeSessionKey;
+
+  while (!state.messages.some((item) => item.id === messageId) && state.hasMore && state.nextBefore) {
+    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(targetAgentId)}/history?limit=30&before=${encodeURIComponent(state.nextBefore)}`);
+    if (!isOperationContextActive({ agentId: targetAgentId, sessionKey: targetSessionKey })) return false;
+    const incoming = Array.isArray(data.messages) ? data.messages : [];
+    state.messages = [...incoming, ...state.messages];
+    state.nextBefore = data.nextBefore || null;
+    state.hasMore = Boolean(data.hasMore);
+  }
+
+  return state.messages.some((item) => item.id === messageId);
+}
+
+function scrollToHistoryMessage(messageId) {
+  const node = Array.from(messageListEl.querySelectorAll('[data-message-id]'))
+    .find((element) => element.dataset.messageId === messageId);
+  if (!node) return;
+  node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 function renderMessages() {
+  messageListEl.classList.toggle('showing-history-target', Boolean(state.historySearchActiveMessageId));
   messageListEl.innerHTML = '';
 
   if (!state.messages.length) {
@@ -489,7 +863,8 @@ function renderMessages() {
     }
 
     const row = document.createElement('div');
-    row.className = `message-row ${message.role}`;
+    row.className = `message-row ${message.role}${message.id === state.historySearchActiveMessageId ? ' search-target' : ''}`;
+    row.dataset.messageId = message.id;
 
     const avatar = createMessageAvatar(message.role);
     const body = document.createElement('div');
@@ -530,6 +905,10 @@ function renderMessages() {
       bubble.append(mediaNode);
     }
 
+    if (message.id === state.historySearchActiveMessageId && state.historySearchQuery) {
+      highlightSearchTextInElement(bubble, state.historySearchQuery);
+    }
+
     const time = document.createElement('div');
     time.className = 'message-time';
     time.textContent = formatTime(message.createdAt);
@@ -542,6 +921,50 @@ function renderMessages() {
   if (isActiveSessionBusy()) {
     messageListEl.append(createAssistantProcessingRow());
   }
+}
+
+function highlightSearchTextInElement(element, query) {
+  const normalizedQuery = String(query || '').trim();
+  if (!element || !normalizedQuery) return;
+
+  const escapedQuery = escapeRegExp(normalizedQuery);
+  const splitMatcher = new RegExp(`(${escapedQuery})`, 'giu');
+  const testMatcher = new RegExp(escapedQuery, 'iu');
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest('code, pre, mark')) return NodeFilter.FILTER_REJECT;
+      return testMatcher.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+
+  const textNodes = [];
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode);
+  }
+
+  for (const textNode of textNodes) {
+    const fragment = document.createDocumentFragment();
+    const parts = textNode.nodeValue.split(splitMatcher);
+    parts.forEach((part, index) => {
+      if (!part) return;
+      if (index % 2 === 1) {
+        const mark = document.createElement('mark');
+        mark.className = 'history-search-highlight';
+        mark.textContent = part;
+        fragment.append(mark);
+        return;
+      }
+      fragment.append(document.createTextNode(part));
+    });
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  }
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function renderMediaBlock(block, bubble = null) {
@@ -954,10 +1377,19 @@ async function handleCommandMenuClick(event) {
   await executeSlashCommand(command);
 }
 
-function handleOutsideCommandMenuClick(event) {
-  if (!commandMenuEl || commandMenuEl.classList.contains('hidden')) return;
-  if (commandMenuEl.contains(event.target) || newContextButtonEl.contains(event.target)) return;
-  closeCommandMenu();
+function handleGlobalDocumentClick(event) {
+  const target = event.target;
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+
+  if (commandMenuEl && !commandMenuEl.classList.contains('hidden')) {
+    if (!commandMenuEl.contains(target) && !newContextButtonEl.contains(target)) {
+      closeCommandMenu();
+    }
+  }
+
+  if (state.historySearchOpen && historySearchShellEl && !historySearchShellEl.contains(target) && !path.includes(historySearchShellEl)) {
+    setHistorySearchOpen(false);
+  }
 }
 
 function setCommandMenuOpen(open) {
@@ -1072,6 +1504,12 @@ function updateHeader() {
     ? `${active.hasSession ? '长期主时间线' : '点击后自动创建'} · ${active.summary || '暂无摘要'}`
     : '选择 agent 开始聊天';
   headerPresenceEl.className = `presence-dot ${normalizePresence(active?.presence || 'idle')}`;
+  if (!active) {
+    state.historySearchOpen = false;
+    state.historySearchRecentQueries = [];
+    state.historySearchShowingRecents = false;
+  }
+  renderHistorySearchPanel();
 }
 
 function createAvatarElement({ className, avatarUrl, label, fallbackText }) {
@@ -1654,6 +2092,11 @@ function handleWindowKeydown(event) {
   }
 
   if (event.key === 'Escape') {
+    if (state.historySearchOpen) {
+      setHistorySearchOpen(false);
+      historySearchInputEl?.blur();
+      return;
+    }
     closeCommandMenu();
   }
 }
@@ -2120,6 +2563,17 @@ function formatAgentTimestamp(value) {
   }
 
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatSearchTimestamp(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function formatBytes(value) {

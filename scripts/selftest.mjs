@@ -32,6 +32,7 @@ await checkAudioUpload();
 await checkSend();
 await checkReset();
 await checkHistory();
+await checkHistorySearch();
 
 console.log('SELFTEST_OK');
 
@@ -50,6 +51,10 @@ async function checkPageShell() {
   assert(html.includes('id="mediaUploadInput"'), 'page should contain mediaUploadInput');
   assert(html.includes('id="newContextButton"'), 'page should contain slash trigger button');
   assert(html.includes('id="commandMenu"'), 'page should contain command menu');
+  assert(html.includes('id="historySearchShell"'), 'page should contain persistent history search shell');
+  assert(html.includes('id="historySearchPanel"'), 'page should contain history search panel');
+  assert(html.includes('id="historySearchInput"'), 'page should contain history search input');
+  assert(html.includes('id="historySearchResults"'), 'page should contain history search results container');
   assert(html.includes('id="settingsPanel"'), 'page should contain settingsPanel');
   assert(html.includes('id="settingsContactSelect"'), 'page should contain settingsContactSelect');
   assert(html.includes('id="saveSettingsButton"'), 'page should contain saveSettingsButton');
@@ -66,6 +71,11 @@ async function checkPageShell() {
 
   const appJs = await getText('/static/app.js');
   const css = await getText('/static/styles.css');
+  assert(appJs.includes('HISTORY_SEARCH_RECENTS_STORAGE_KEY'), 'app.js should include history search recent storage key');
+  assert(appJs.includes('function createHistorySearchRecentItem'), 'app.js should include history search recent item rendering');
+  assert(appJs.includes('function highlightSearchTextInElement'), 'app.js should include history search text highlight helper');
+  assert(appJs.includes('function handleHistorySearchFocus'), 'app.js should include history search focus handler');
+  assert(appJs.includes('function handleGlobalDocumentClick'), 'app.js should include outside click collapse handler');
   assert(appJs.includes('async function openAgent'), 'app.js should include openAgent');
   assert(appJs.includes('async function ensurePendingUploadsReady'), 'app.js should include image upload flow');
   assert(appJs.includes('async function saveSettingsContact'), 'app.js should include unified visual contact settings');
@@ -85,6 +95,16 @@ async function checkPageShell() {
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
   assert(css.includes('.command-menu'), 'styles.css should include slash command menu styles');
+  assert(css.includes('.history-search-shell'), 'styles.css should include persistent history search shell styles');
+  assert(css.includes('.history-search-inline-form'), 'styles.css should include inline history search form styles');
+  assert(css.includes('.history-search-panel'), 'styles.css should include history search panel styles');
+  assert(css.includes('.history-search-result'), 'styles.css should include history search result styles');
+  assert(css.includes('.history-search-result.active'), 'styles.css should include active history search result styles');
+  assert(css.includes('.history-search-result.recent'), 'styles.css should include recent history search list styles');
+  assert(css.includes('.history-search-result.recent + .history-search-result.recent'), 'styles.css should include recent search divider styles');
+  assert(css.includes('.history-search-highlight'), 'styles.css should include history search keyword highlight styles');
+  assert(css.includes('.message-row.search-target .message-bubble'), 'styles.css should include search target highlight styles');
+  assert(css.includes('.message-list.showing-history-target > :first-child'), 'styles.css should disable bottom anchoring when showing a history target');
   assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
   assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
@@ -286,6 +306,13 @@ async function checkHistory() {
   assert(typeof payload?.hasMore === 'boolean', 'history should return hasMore');
   assert('nextBefore' in payload, 'history should return nextBefore field');
   assert(payload.messages.some((item) => item.role === 'marker' && item.label === '已重置上下文'), 'history should include reset marker');
+}
+
+async function checkHistorySearch() {
+  const payload = await getJson(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/history/search?q=${encodeURIComponent(unique)}&limit=5`);
+  assert(Array.isArray(payload?.results), 'history search should return results array');
+  assert(typeof payload?.total === 'number', 'history search should return total count');
+  assert(payload.results.some((item) => String(item?.excerpt || '').includes(unique) || String(item?.summary || '').includes(unique)), 'history search should find the unique token');
 }
 
 function collectText(message) {

@@ -538,6 +538,10 @@ button {
   top: 0;
   z-index: 3;
   background: var(--surface-4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .chat-header-left,
@@ -553,6 +557,18 @@ button {
   gap: 10px;
 }
 
+.chat-header-left {
+  min-width: 0;
+}
+
+.chat-header-actions {
+  margin-left: auto;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
 .chat-panel {
   min-height: 0;
   display: grid;
@@ -564,6 +580,169 @@ button {
   min-height: 24px;
   padding: 12px 24px 0;
   font-size: 13px;
+}
+
+.history-search-shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+#headerRefreshButton {
+  flex: 0 0 auto;
+}
+
+.history-search-inline-form,
+.history-search-result-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-search-inline-form {
+  width: 100%;
+  padding: 6px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  box-shadow: var(--bubble-shadow);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.history-search-shell.active .history-search-inline-form,
+.history-search-inline-form:focus-within {
+  border-color: rgba(59, 130, 246, 0.38);
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.12),
+    var(--bubble-shadow);
+}
+
+.history-search-inline-form input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 14px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+.history-search-inline-form input:focus {
+  outline: none;
+}
+
+.history-search-inline-form input::placeholder {
+  color: var(--muted);
+}
+
+.history-search-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  z-index: 4;
+}
+
+.history-search-meta {
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.history-search-meta:empty {
+  display: none;
+}
+
+.history-search-results {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.history-search-result,
+.history-search-empty {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+}
+
+.history-search-result {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: inherit;
+  display: grid;
+  gap: 6px;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.history-search-result:hover,
+.history-search-result:focus-visible {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: var(--brand-soft);
+  transform: translateY(-1px);
+}
+
+.history-search-result.active {
+  border-color: rgba(59, 130, 246, 0.48);
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.14);
+}
+
+.history-search-result.recent {
+  padding: 8px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: color 140ms ease, background 140ms ease, padding-left 140ms ease;
+}
+
+.history-search-result.recent + .history-search-result.recent {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.history-search-result.recent:hover,
+.history-search-result.recent:focus-visible {
+  transform: none;
+  background: rgba(59, 130, 246, 0.06);
+  border-color: transparent;
+  color: var(--brand);
+  padding-left: 6px;
+}
+
+.history-search-role,
+.history-search-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.history-search-role {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.history-search-excerpt {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-soft);
+  word-break: break-word;
+}
+
+.history-search-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .message-list {
@@ -579,6 +758,10 @@ button {
 
 .message-list > :first-child {
   margin-top: auto;
+}
+
+.message-list.showing-history-target > :first-child {
+  margin-top: 0;
 }
 
 .empty-state {
@@ -605,6 +788,20 @@ button {
 
 .message-row.assistant {
   align-self: flex-start;
+}
+
+.message-row.search-target .message-bubble {
+  border-color: rgba(59, 130, 246, 0.52);
+  box-shadow:
+    0 0 0 2px rgba(59, 130, 246, 0.14),
+    var(--bubble-shadow);
+}
+
+.history-search-highlight {
+  padding: 0 0.18em;
+  border-radius: 0.32em;
+  background: rgba(250, 204, 21, 0.36);
+  color: inherit;
 }
 
 .message-body {
@@ -1648,6 +1845,11 @@ button {
 }
 
 @media (max-width: 640px) {
+  .chat-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .chat-header,
   .chat-status,
   .message-list,
@@ -1658,6 +1860,18 @@ button {
 
   .composer {
     grid-template-columns: 1fr;
+  }
+
+  .chat-header-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: stretch;
+    flex-wrap: nowrap;
+  }
+
+  .history-search-shell {
+    flex: 1 1 auto;
+    max-width: none;
   }
 
   .composer-actions {

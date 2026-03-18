@@ -158,6 +158,23 @@ app.get('/api/openclaw-webchat/agents/:agentId/history', (req, res) => {
   }
 });
 
+app.get('/api/openclaw-webchat/agents/:agentId/history/search', (req, res) => {
+  const { agentId } = req.params;
+  const query = normalizeOptionalString(req.query.q);
+  const limit = clampInt(req.query.limit, 20, 1, 50);
+
+  if (!query) {
+    return res.status(400).json({ error: 'Search query is required.' });
+  }
+
+  try {
+    const result = searchHistory({ agentId, query, limit });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
 app.post('/api/openclaw-webchat/sessions/:sessionKey/send', async (req, res) => {
   const { sessionKey } = req.params;
   const text = String(req.body?.text || '').trim();
@@ -1235,6 +1252,39 @@ function getHistoryPage({ agentId, limit, before }) {
   };
 }
 
+function searchHistory({ agentId, query, limit }) {
+  const normalizedQuery = String(query || '').trim();
+  const rows = loadHistory(agentId)
+    .sort(compareHistoryAsc)
+    .reverse();
+
+  const results = [];
+  let total = 0;
+
+  for (const row of rows) {
+    const searchableText = buildHistorySearchText(row);
+    if (!searchableText) continue;
+    if (!matchesSearchQuery(searchableText, normalizedQuery)) continue;
+
+    total += 1;
+    if (results.length >= limit) continue;
+
+    results.push({
+      id: row.id,
+      role: row.role,
+      createdAt: row.createdAt,
+      excerpt: extractSearchExcerpt(searchableText, normalizedQuery),
+      summary: buildMessageSummary(row)
+    });
+  }
+
+  return {
+    query: normalizedQuery,
+    total,
+    results
+  };
+}
+
 function loadHistory(agentId) {
   const filePath = historyFile(agentId);
   if (!fs.existsSync(filePath)) return [];
@@ -1302,6 +1352,63 @@ function presentHistoryEntry(row) {
     createdAt: row.createdAt,
     blocks: row.blocks.map(presentBlock)
   };
+}
+
+function buildHistorySearchText(row) {
+  if (!row) return '';
+  if (row.role === 'marker') {
+    return String(row.label || '').trim();
+  }
+
+  const fragments = [];
+  for (const block of Array.isArray(row.blocks) ? row.blocks : []) {
+    if (block?.type === 'text' && block.text) {
+      fragments.push(String(block.text));
+      continue;
+    }
+
+    if (block?.name) {
+      fragments.push(String(block.name));
+    }
+
+    if (block?.transcriptText) {
+      fragments.push(String(block.transcriptText));
+    }
+  }
+
+  return fragments
+    .join('\n')
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+
+function matchesSearchQuery(text, query) {
+  const haystack = String(text || '').toLocaleLowerCase();
+  const needle = String(query || '').trim().toLocaleLowerCase();
+  if (!needle) return false;
+  return haystack.includes(needle);
+}
+
+function extractSearchExcerpt(text, query, maxLength = 120) {
+  const normalizedText = String(text || '').replace(/\s+/g, ' ').trim();
+  const normalizedQuery = String(query || '').trim();
+  if (!normalizedText) return '';
+  if (!normalizedQuery) return normalizedText.length > maxLength ? `${normalizedText.slice(0, maxLength - 1)}…` : normalizedText;
+
+  const lowerText = normalizedText.toLocaleLowerCase();
+  const lowerQuery = normalizedQuery.toLocaleLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+
+  if (index < 0) {
+    return normalizedText.length > maxLength ? `${normalizedText.slice(0, maxLength - 1)}…` : normalizedText;
+  }
+
+  const lead = Math.max(0, index - Math.floor((maxLength - normalizedQuery.length) / 2));
+  const tail = Math.min(normalizedText.length, lead + maxLength);
+  const slice = normalizedText.slice(lead, tail).trim();
+  const prefix = lead > 0 ? '…' : '';
+  const suffix = tail < normalizedText.length ? '…' : '';
+  return `${prefix}${slice}${suffix}`;
 }
 
 function presentBlock(block) {
