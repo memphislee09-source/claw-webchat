@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parseTextIntoBlocks } from '../public/message-blocks.js';
 
@@ -20,11 +20,11 @@ const PROFILES_FILE = path.join(DATA_DIR, 'agent-profiles.json');
 const USER_PROFILE_FILE = path.join(DATA_DIR, 'user-profile.json');
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
-const MEDIA_SECRET = process.env.OPENCLAW_WEBCHAT_MEDIA_SECRET || 'openclaw-webchat-local-secret';
 const HISTORY_PAGE_LIMIT_MAX = 200;
 const HISTORY_OPEN_PAGE_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_OPEN_PAGE_LIMIT || 15);
 const NAMESPACE = 'openclaw-webchat';
 const BOOTSTRAP_VERSION = '2026-03-16.phase2';
+const LEGACY_AVATAR_MEDIA_SECRETS = ['openclaw-webchat-local-secret'];
 const ACTIVE_RECENT_WINDOW_MS = 5 * 60 * 1000;
 const ASSISTANT_WAIT_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_ASSISTANT_WAIT_TIMEOUT_MS || 120000);
 const ASSISTANT_LATE_REPLY_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_LATE_REPLY_TIMEOUT_MS || 10 * 60 * 1000);
@@ -74,6 +74,7 @@ ensureDir(UPLOADS_DIR);
 ensureJsonFile(BINDINGS_FILE, '{}');
 ensureJsonFile(PROFILES_FILE, '{}');
 ensureJsonFile(USER_PROFILE_FILE, JSON.stringify({ displayName: '我', avatarUrl: null }, null, 2));
+const MEDIA_SECRET = resolveMediaSecret();
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, service: NAMESPACE, port: PORT, namespace: NAMESPACE });
@@ -255,7 +256,7 @@ app.patch('/api/openclaw-webchat/settings/user-profile', (req, res) => {
   }
 });
 
-app.post('/api/openclaw-webchat/uploads', (req, res) => {
+app.post('/api/openclaw-webchat/uploads', async (req, res) => {
   const kind = String(req.body?.kind || '').toLowerCase();
   const filename = normalizeOptionalString(req.body?.filename) || 'upload';
   const mimeType = normalizeOptionalString(req.body?.mimeType) || 'application/octet-stream';
@@ -295,7 +296,7 @@ app.post('/api/openclaw-webchat/uploads', (req, res) => {
     };
 
     if (kind === 'audio' && transcribe) {
-      const transcription = transcribeAudioFile(stored.filePath, stored.displayName);
+      const transcription = await transcribeAudioFile(stored.filePath, stored.displayName);
       if (transcription.ok) {
         block.transcriptStatus = 'ready';
         block.transcriptText = transcription.text;
@@ -401,9 +402,11 @@ async function runUserTurn(binding, { text, inputBlocks }) {
     }
 
     if (!assistantRaw) {
-      const pendingMessage = recordAssistantTextMessage(latestBinding, '（处理中，稍后自动补回）', {
-        replyState: 'running'
+      patchBinding(binding.agentId, {
+        replyState: 'running',
+        updatedAt: new Date().toISOString()
       });
+      const pendingMessage = buildAssistantTextResponse(binding, '（处理中，稍后自动补回）');
       scheduleLateAssistantReplyReconciliation(latestBinding, {
         turnSnapshot,
         minTimestampMs: startedAt,
@@ -766,6 +769,17 @@ function buildSlashHelpText() {
     '',
     '说明：这些命令在 openclaw-webchat 内本地执行，不会作为普通消息发给 agent。'
   ].join('\n');
+}
+
+function buildAssistantTextResponse(binding, text) {
+  return presentHistoryEntry(normalizeHistoryRow({
+    id: cryptoId(),
+    agentId: binding.agentId,
+    sessionKey: binding.sessionKey,
+    role: 'assistant',
+    createdAt: new Date().toISOString(),
+    blocks: [{ type: 'text', text }]
+  }));
 }
 
 function recordAssistantTextMessage(binding, text, patch = {}) {
@@ -1305,25 +1319,51 @@ function presentBlock(block) {
     };
   }
 
-  if (source.startsWith('/')) {
-    const resolved = path.resolve(source);
-    if (!fs.existsSync(resolved)) {
+  const remoteUrl = normalizeSafeRemoteMediaUrl(source);
+  if (remoteUrl) {
+    return {
+      type: block.type,
+      url: remoteUrl,
+      name: block.name || null,
+      mimeType: block.mimeType || null,
+      sizeBytes: block.sizeBytes || null,
+      transcriptStatus: block.transcriptStatus || null,
+      transcriptText: block.transcriptText || null,
+      transcriptError: block.transcriptError || null
+    };
+  }
+
+  const localPath = resolveLocalMediaPath(source);
+  if (localPath) {
+    if (!isAllowedMediaPath(localPath)) {
       return {
         type: block.type,
         invalid: true,
-        invalidReason: '文件丢失',
-        name: block.name || path.basename(source),
+        invalidReason: '文件不可访问',
+        name: block.name || path.basename(localPath),
         transcriptStatus: block.transcriptStatus || null,
         transcriptText: block.transcriptText || null,
         transcriptError: block.transcriptError || null
       };
     }
 
-    const token = signMediaToken(resolved);
+    if (!fs.existsSync(localPath)) {
+      return {
+        type: block.type,
+        invalid: true,
+        invalidReason: '文件丢失',
+        name: block.name || path.basename(localPath),
+        transcriptStatus: block.transcriptStatus || null,
+        transcriptText: block.transcriptText || null,
+        transcriptError: block.transcriptError || null
+      };
+    }
+
+    const token = signMediaToken(localPath);
     return {
       type: block.type,
       url: `/api/openclaw-webchat/media?token=${encodeURIComponent(token)}`,
-      name: block.name || path.basename(source),
+      name: block.name || path.basename(localPath),
       mimeType: block.mimeType || null,
       sizeBytes: block.sizeBytes || null,
       transcriptStatus: block.transcriptStatus || null,
@@ -1334,10 +1374,9 @@ function presentBlock(block) {
 
   return {
     type: block.type,
-    url: source,
+    invalid: true,
+    invalidReason: '不支持的媒体地址',
     name: block.name || null,
-    mimeType: block.mimeType || null,
-    sizeBytes: block.sizeBytes || null,
     transcriptStatus: block.transcriptStatus || null,
     transcriptText: block.transcriptText || null,
     transcriptError: block.transcriptError || null
@@ -1546,11 +1585,11 @@ function inferUploadExtension(filename, mimeType, kind) {
   return '.bin';
 }
 
-function transcribeAudioFile(filePath, displayName) {
+async function transcribeAudioFile(filePath, displayName) {
   const tempDir = fs.mkdtempSync(path.join(DATA_DIR, 'whisper-'));
 
   try {
-    const result = spawnSync(WHISPER_BIN, [
+    await execFileAsync(WHISPER_BIN, [
       filePath,
       '--model',
       WHISPER_MODEL,
@@ -1566,11 +1605,6 @@ function transcribeAudioFile(filePath, displayName) {
       timeout: WHISPER_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024
     });
-
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      throw new Error(String(result.stderr || result.stdout || `${WHISPER_BIN} exited with ${result.status}`).trim());
-    }
 
     const transcriptPath = path.join(tempDir, `${path.parse(filePath).name}.txt`);
     if (!fs.existsSync(transcriptPath)) {
@@ -1612,11 +1646,20 @@ function signMediaToken(filePath) {
 }
 
 function decodeMediaToken(token, { ignoreExpiration = false } = {}) {
+  return decodeMediaTokenWithSecrets(token, [MEDIA_SECRET], { ignoreExpiration });
+}
+
+function decodeMediaTokenWithSecrets(token, secrets, { ignoreExpiration = false } = {}) {
   try {
     const decoded = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
     const payloadJson = JSON.stringify(decoded.payload);
-    const expectedSig = crypto.createHmac('sha256', MEDIA_SECRET).update(payloadJson).digest('hex');
-    if (decoded.sig !== expectedSig) return null;
+    const valid = (secrets || []).some((secret) => {
+      const normalizedSecret = normalizeOptionalString(secret);
+      if (!normalizedSecret) return false;
+      const expectedSig = crypto.createHmac('sha256', normalizedSecret).update(payloadJson).digest('hex');
+      return decoded.sig === expectedSig;
+    });
+    if (!valid) return null;
     if (!ignoreExpiration && (!decoded.payload?.exp || Date.now() > decoded.payload.exp)) return null;
     return decoded.payload;
   } catch {
@@ -1629,13 +1672,8 @@ function verifyMediaToken(token) {
 }
 
 function isAllowedMediaPath(filePath) {
-  const normalized = path.resolve(filePath);
-  const home = path.resolve(process.env.HOME || '/');
-  const allowedRoots = [
-    path.resolve(process.env.HOME || '', '.openclaw'),
-    home
-  ];
-  return allowedRoots.some((root) => normalized.startsWith(root));
+  const normalized = resolveExistingPath(filePath);
+  return getAllowedMediaRoots().some((root) => isPathWithinRoot(normalized, root));
 }
 
 function normalizeAvatarValue(value) {
@@ -1651,14 +1689,15 @@ function presentAvatarUrl(value) {
   const normalized = normalizeAvatarValue(value);
   if (!normalized) return null;
 
-  if (normalized.startsWith('/')) {
-    const resolved = path.resolve(normalized);
+  const localPath = resolveLocalMediaPath(normalized);
+  if (localPath) {
+    const resolved = resolveExistingPath(localPath);
     if (!isAllowedMediaPath(resolved) || !fs.existsSync(resolved)) return null;
     const token = signMediaToken(resolved);
     return `/api/openclaw-webchat/media?token=${encodeURIComponent(token)}`;
   }
 
-  return normalized;
+  return normalizeSafeRemoteMediaUrl(normalized);
 }
 
 function decodeAvatarMediaPath(value) {
@@ -1673,10 +1712,87 @@ function decodeAvatarMediaPath(value) {
     if (parsed.pathname !== '/api/openclaw-webchat/media') return null;
     const token = parsed.searchParams.get('token');
     if (!token) return null;
-    const payload = decodeMediaToken(token, { ignoreExpiration: true });
+    const payload = decodeMediaTokenWithSecrets(
+      token,
+      [MEDIA_SECRET, ...LEGACY_AVATAR_MEDIA_SECRETS],
+      { ignoreExpiration: true }
+    );
     if (!payload?.path) return null;
     const resolved = path.resolve(payload.path);
     return isAllowedMediaPath(resolved) ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveMediaSecret() {
+  const envSecret = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_MEDIA_SECRET);
+  if (envSecret) return envSecret;
+
+  const secretFile = path.join(DATA_DIR, '.media-secret');
+  try {
+    if (fs.existsSync(secretFile)) {
+      const existing = fs.readFileSync(secretFile, 'utf8').trim();
+      if (existing) return existing;
+    }
+  } catch {
+    // ignore read errors and regenerate below
+  }
+
+  const generated = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.writeFileSync(secretFile, `${generated}\n`, { encoding: 'utf8', mode: 0o600 });
+  } catch {
+    // ignore write errors and fall back to process-lifetime secret
+  }
+  return generated;
+}
+
+function getAllowedMediaRoots() {
+  const roots = [
+    path.resolve(UPLOADS_DIR),
+    path.resolve(process.env.HOME || '', '.openclaw')
+  ];
+  return roots.filter(Boolean);
+}
+
+function isPathWithinRoot(targetPath, rootPath) {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function resolveExistingPath(filePath) {
+  const normalized = path.resolve(filePath);
+  if (!fs.existsSync(normalized)) return normalized;
+  try {
+    return fs.realpathSync(normalized);
+  } catch {
+    return normalized;
+  }
+}
+
+function resolveLocalMediaPath(source) {
+  const normalized = normalizeOptionalString(source);
+  if (!normalized || normalized.startsWith('/api/')) return null;
+  if (normalized.startsWith('~/')) {
+    return path.resolve(process.env.HOME || '', normalized.slice(2));
+  }
+  if (normalized.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(normalized)) {
+    return path.resolve(normalized);
+  }
+  return null;
+}
+
+function normalizeSafeRemoteMediaUrl(source) {
+  const normalized = normalizeOptionalString(source);
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+
+  try {
+    const parsed = new URL(normalized, 'http://localhost');
+    if (parsed.origin !== 'http://localhost') return null;
+    if (parsed.pathname !== '/api/openclaw-webchat/media') return null;
+    return `${parsed.pathname}${parsed.search}`;
   } catch {
     return null;
   }

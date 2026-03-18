@@ -44,6 +44,7 @@ const state = {
   mediaViewerDragStartY: 0,
   mediaViewerMoved: false,
   themeChoice: 'dark',
+  autoScrollPinned: true,
   userProfile: {
     displayName: '我',
     avatarUrl: null
@@ -123,6 +124,7 @@ function bindEvents() {
   mediaUploadInputEl.addEventListener('change', handleFileSelection);
   composerInputEl.addEventListener('input', autoResizeComposer);
   messageListEl.addEventListener('scroll', async () => {
+    state.autoScrollPinned = isNearBottom();
     if (messageListEl.scrollTop > 64) return;
     if (!state.activeAgentId || !state.hasMore || state.loadingHistory) return;
     await loadOlderHistory();
@@ -254,7 +256,7 @@ async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) 
     : null;
   const data = await apiGet('/api/openclaw-webchat/agents');
   state.agents = Array.isArray(data.agents) ? data.agents : [];
-  renderAgentList();
+  renderAgentList({ refreshIdentity: false });
   updateHeader();
   populateSettingsForm();
 
@@ -296,10 +298,9 @@ function shouldRefreshCurrentConversation(previousAgent, nextAgent) {
     || previousAgent.presence !== nextAgent.presence;
 }
 
-function renderAgentList() {
-  agentListEl.innerHTML = '';
-
+function renderAgentList({ refreshIdentity = true } = {}) {
   if (!state.agents.length) {
+    agentListEl.innerHTML = '';
     const empty = document.createElement('div');
     empty.className = 'empty-tip';
     empty.textContent = '暂未发现 agent。';
@@ -307,59 +308,116 @@ function renderAgentList() {
     return;
   }
 
+  agentListEl.querySelectorAll('.empty-tip').forEach((node) => node.remove());
+  const existing = new Map(Array.from(agentListEl.querySelectorAll('.agent-card')).map((button) => [button.dataset.agentId, button]));
+
   for (const agent of state.agents) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `agent-card${agent.agentId === state.activeAgentId ? ' active' : ''}`;
-    button.addEventListener('click', () => openAgent(agent.agentId, { forceReload: agent.agentId !== state.activeAgentId }));
-
-    const avatar = createAvatarElement({
-      className: 'agent-avatar',
-      avatarUrl: agent.avatarUrl,
-      label: agent.name || agent.agentId,
-      fallbackText: (agent.name || agent.agentId || '?').slice(0, 1).toUpperCase()
+    const button = existing.get(agent.agentId) || createAgentCardElement(agent);
+    existing.delete(agent.agentId);
+    updateAgentCardElement(button, agent, {
+      refreshIdentity: refreshIdentity || !button.isConnected
     });
-
-    const content = document.createElement('div');
-    content.className = 'agent-content';
-
-    const topRow = document.createElement('div');
-    topRow.className = 'agent-top-row';
-
-    const name = document.createElement('div');
-    name.className = 'agent-name';
-    name.textContent = agent.name || agent.agentId;
-
-    const meta = document.createElement('div');
-    meta.className = 'agent-meta';
-
-    const presence = document.createElement('span');
-    presence.className = `presence-dot ${normalizePresence(agent.presence)}`;
-    presence.title = formatPresenceLabel(agent.presence);
-
-    const presenceLabel = document.createElement('span');
-    presenceLabel.className = 'agent-presence-label';
-    presenceLabel.textContent = formatPresenceLabel(agent.presence);
-
-    meta.append(presence, presenceLabel);
-
-    const summary = document.createElement('div');
-    summary.className = 'agent-summary';
-    summary.textContent = agent.summary || '点击进入会话';
-
-    const bottomRow = document.createElement('div');
-    bottomRow.className = 'agent-bottom-row';
-
-    const time = document.createElement('div');
-    time.className = 'agent-time';
-    time.textContent = formatAgentTimestamp(agent.lastMessageAt);
-
-    bottomRow.append(summary, time);
-    topRow.append(name, meta);
-    content.append(topRow, bottomRow);
-    button.append(avatar, content);
     agentListEl.append(button);
   }
+
+  existing.forEach((button) => button.remove());
+}
+
+function createAgentCardElement(agent) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.agentId = agent.agentId;
+  button.className = 'agent-card';
+  button.addEventListener('click', () => openAgent(agent.agentId, { forceReload: agent.agentId !== state.activeAgentId }));
+
+  const avatar = createAvatarElement({
+    className: 'agent-avatar',
+    avatarUrl: agent.avatarUrl,
+    label: agent.name || agent.agentId,
+    fallbackText: (agent.name || agent.agentId || '?').slice(0, 1).toUpperCase()
+  });
+
+  const content = document.createElement('div');
+  content.className = 'agent-content';
+
+  const topRow = document.createElement('div');
+  topRow.className = 'agent-top-row';
+
+  const name = document.createElement('div');
+  name.className = 'agent-name';
+
+  const meta = document.createElement('div');
+  meta.className = 'agent-meta';
+
+  const presence = document.createElement('span');
+  presence.className = 'presence-dot idle';
+
+  const presenceLabel = document.createElement('span');
+  presenceLabel.className = 'agent-presence-label';
+
+  meta.append(presence, presenceLabel);
+
+  const summary = document.createElement('div');
+  summary.className = 'agent-summary';
+
+  const bottomRow = document.createElement('div');
+  bottomRow.className = 'agent-bottom-row';
+
+  const time = document.createElement('div');
+  time.className = 'agent-time';
+
+  bottomRow.append(summary, time);
+  topRow.append(name, meta);
+  content.append(topRow, bottomRow);
+  button.append(avatar, content);
+  button._agentRefs = { avatar, name, presence, presenceLabel, summary, time };
+  updateAgentCardElement(button, agent, { refreshIdentity: true });
+  return button;
+}
+
+function updateAgentCardElement(button, agent, { refreshIdentity = true } = {}) {
+  const refs = button._agentRefs;
+  if (!refs) return;
+
+  button.classList.toggle('active', agent.agentId === state.activeAgentId);
+  button.dataset.agentId = agent.agentId;
+
+  if (refreshIdentity) {
+    updateAgentCardIdentity(button, agent);
+  }
+
+  const presenceState = normalizePresence(agent.presence);
+  refs.presence.className = `presence-dot ${presenceState}`;
+  refs.presence.title = formatPresenceLabel(agent.presence);
+  refs.presenceLabel.textContent = formatPresenceLabel(agent.presence);
+  refs.summary.textContent = agent.summary || '点击进入会话';
+  refs.time.textContent = formatAgentTimestamp(agent.lastMessageAt);
+}
+
+function updateAgentCardIdentity(button, agent) {
+  const refs = button._agentRefs;
+  if (!refs) return;
+
+  const nextLabel = agent.name || agent.agentId;
+  const nextAvatarUrl = agent.avatarUrl || '';
+  const nextFallback = (nextLabel || '?').slice(0, 1).toUpperCase();
+
+  refs.name.textContent = nextLabel;
+
+  if (button.dataset.avatarUrl === nextAvatarUrl && button.dataset.agentLabel === nextLabel) {
+    return;
+  }
+
+  const nextAvatar = createAvatarElement({
+    className: 'agent-avatar',
+    avatarUrl: agent.avatarUrl,
+    label: nextLabel,
+    fallbackText: nextFallback
+  });
+  refs.avatar.replaceWith(nextAvatar);
+  refs.avatar = nextAvatar;
+  button.dataset.avatarUrl = nextAvatarUrl;
+  button.dataset.agentLabel = nextLabel;
 }
 
 async function openAgent(agentId, { forceReload = false, preserveScrollBottom = false } = {}) {
@@ -369,7 +427,7 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   const requestId = state.openRequestId + 1;
   state.openRequestId = requestId;
   state.activeAgentId = agentId;
-  renderAgentList();
+  renderAgentList({ refreshIdentity: false });
   updateHeader();
   populateSettingsForm();
   showStatus('正在打开会话…', 'info');
@@ -386,7 +444,11 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
     syncComposerInteractivity();
     updateHeader();
     populateSettingsForm();
-    if (!preserveScrollBottom) scrollMessagesToBottom();
+    if (!preserveScrollBottom) {
+      maybeScrollMessagesToBottom(true);
+    } else {
+      maybeScrollMessagesToBottom();
+    }
     showStatus(response.created ? '已创建并进入该 agent 的长期主时间线。' : '会话已恢复。', 'success');
   })();
 
@@ -742,7 +804,7 @@ async function handleSendSubmit(event) {
   renderPendingUploads();
   autoResizeComposer();
   renderMessages();
-  scrollMessagesToBottom();
+  maybeScrollMessagesToBottom(true);
 
   try {
     const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/send`, {
@@ -753,7 +815,7 @@ async function handleSendSubmit(event) {
     releasePendingUploads(draftAttachments);
     if (isOperationContextActive(context)) {
       renderMessages();
-      scrollMessagesToBottom();
+      maybeScrollMessagesToBottom();
     }
     showContextStatus(context, '发送完成。', 'success');
     await refreshAgents({ autoOpen: false });
@@ -771,7 +833,7 @@ async function handleSendSubmit(event) {
     endSessionActivity(targetSessionKey);
     if (isOperationContextActive(context)) {
       renderMessages();
-      scrollMessagesToBottom();
+      maybeScrollMessagesToBottom();
     }
   }
 }
@@ -807,7 +869,7 @@ async function handleFileSelection(event) {
   state.pendingUploads.push(...additions);
   renderPendingUploads();
   event.target.value = '';
-  scrollMessagesToBottom();
+  maybeScrollMessagesToBottom(true);
 }
 
 async function loadCommandCatalog() {
@@ -966,7 +1028,7 @@ async function executeSlashCommand(command) {
     if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
     if (isOperationContextActive(context)) {
       renderMessages();
-      scrollMessagesToBottom();
+      maybeScrollMessagesToBottom(true);
     }
     showContextStatus(context, buildSlashCommandSuccessMessage(command), 'success');
     await refreshAgents({ autoOpen: false });
@@ -1835,7 +1897,7 @@ async function saveSettingsContact() {
       });
     }
 
-    renderAgentList();
+    renderAgentList({ refreshIdentity: true });
     updateHeader();
     renderMessages();
     loadSettingsDraft(target.key);
@@ -1894,11 +1956,16 @@ function scrollMessagesToBottom() {
   });
 }
 
+function maybeScrollMessagesToBottom(force = false) {
+  if (!force && !state.autoScrollPinned) return;
+  scrollMessagesToBottom();
+}
+
 function keepMessagesPinnedOnMediaLoad(element, eventName) {
-  const shouldStickToBottom = isNearBottom();
+  const shouldStickToBottom = state.autoScrollPinned || isNearBottom();
   element.addEventListener(eventName, () => {
-    if (!shouldStickToBottom && !isNearBottom()) return;
-    scrollMessagesToBottom();
+    if (!shouldStickToBottom && !state.autoScrollPinned && !isNearBottom()) return;
+    maybeScrollMessagesToBottom();
   }, { once: true });
 }
 
@@ -1930,6 +1997,7 @@ function beginSessionActivity(sessionKey) {
   if (!sessionKey) return;
   state.sendingSessionKeys.add(sessionKey);
   if (state.activeSessionKey === sessionKey) {
+    state.autoScrollPinned = true;
     syncComposerInteractivity();
   }
 }

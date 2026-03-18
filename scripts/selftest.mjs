@@ -6,6 +6,7 @@ import { groupMessageBlocksForRender, parseTextIntoBlocks } from '../public/mess
 const base = process.env.OPENCLAW_WEBCHAT_BASE || 'http://127.0.0.1:3770';
 const agentId = process.env.OPENCLAW_WEBCHAT_TEST_AGENT || 'mira';
 const sessionKey = `openclaw-webchat:${agentId}`;
+const requestTimeoutMs = Number(process.env.OPENCLAW_WEBCHAT_SELFTEST_REQUEST_TIMEOUT_MS || 150000);
 const defaultBindingsFile = fileURLToPath(new URL('../data/session-bindings.json', import.meta.url));
 const defaultProfilesFile = fileURLToPath(new URL('../data/agent-profiles.json', import.meta.url));
 const bindingsFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
@@ -300,7 +301,7 @@ function readBinding(targetAgentId) {
 }
 
 async function getJson(path) {
-  const response = await fetch(`${base}${path}`);
+  const response = await fetchWithTimeout(path);
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch {}
@@ -309,7 +310,7 @@ async function getJson(path) {
 }
 
 async function postJson(path, body) {
-  const response = await fetch(`${base}${path}`, {
+  const response = await fetchWithTimeout(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify(body || {})
@@ -322,7 +323,7 @@ async function postJson(path, body) {
 }
 
 async function patchJson(path, body) {
-  const response = await fetch(`${base}${path}`, {
+  const response = await fetchWithTimeout(path, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify(body || {})
@@ -335,10 +336,17 @@ async function patchJson(path, body) {
 }
 
 async function getText(path) {
-  const response = await fetch(`${base}${path}`);
+  const response = await fetchWithTimeout(path);
   const text = await response.text();
   assert(response.ok, `GET ${path} failed: ${response.status}`);
   return text;
+}
+
+async function fetchWithTimeout(path, init = {}) {
+  return fetch(`${base}${path}`, {
+    ...init,
+    signal: AbortSignal.timeout(requestTimeoutMs)
+  });
 }
 
 function assert(condition, message) {

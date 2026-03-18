@@ -10,7 +10,7 @@ OpenClaw WebChat 项目仓库。
 构建可扩展、可维护的 WebChat 客户端，为 OpenClaw 提供稳定的对话交互体验。
 
 ## 当前阶段
-- 阶段：`0.1.2` 已合入 `main`，作为后续开发基点继续演进
+- 阶段：`0.1.2` 已合入 `main`，并吸收 2026-03-18 代码审查修复与体验修正，作为后续开发基点继续演进
 - 当前重点：移动端历史加载稳定性、视觉媒体气泡方案收口、多 agent / 迟到回包回归、音频转写成功链路验收
 
 ## 本地运行
@@ -79,7 +79,8 @@ npm run selftest
 - `docs/PROJECT_CHARTER.md`：项目章程（范围/目标/边界）
 - `docs/ARCHITECTURE.md`：架构草案
 - `docs/ROADMAP.md`：里程碑与迭代节奏
-- `docs/HANDOFF-2026-03-17.md`：最新交接摘要与下一步建议
+- `docs/HANDOFF-2026-03-18.md`：最新主线基线摘要与下一步建议
+- `docs/HANDOFF-2026-03-17.md`：上一轮交接摘要
 - `docs/HANDOFF-2026-03-15.md`：上一轮交接记录
 - `docs/error.md`：错误与修复记录
 
