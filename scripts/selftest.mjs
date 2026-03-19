@@ -23,6 +23,7 @@ await checkCommandsCatalog();
 await checkPageShell();
 await checkMixedMediaParsing();
 await checkSettings();
+await checkConversations();
 await checkAgents();
 await checkAgentProfile();
 await checkOpenAgent();
@@ -33,6 +34,7 @@ await checkSend();
 await checkReset();
 await checkHistory();
 await checkHistorySearch();
+await checkGroupLifecycle();
 
 console.log('SELFTEST_OK');
 
@@ -44,11 +46,14 @@ async function checkHealth() {
 async function checkPageShell() {
   const html = await getText('/');
   assert(html.includes('id="agentList"'), 'page should contain agentList');
+  assert(html.includes('id="createGroupButton"'), 'page should contain createGroupButton');
+  assert(html.includes('id="manageGroupButton"'), 'page should contain manageGroupButton');
   assert(html.includes('id="messageList"'), 'page should contain messageList');
   assert(html.includes('id="composerInput"'), 'page should contain composerInput');
-  assert(html.includes('slash 命令可执行本地命令'), 'page should reflect slash command composer hint');
+  assert(html.includes('群聊里输入 @ 可点名成员'), 'page should reflect group mention composer hint');
   assert(html.includes('id="attachButton"'), 'page should contain attachButton');
   assert(html.includes('id="mediaUploadInput"'), 'page should contain mediaUploadInput');
+  assert(html.includes('id="mentionMenu"'), 'page should contain mentionMenu');
   assert(html.includes('id="newContextButton"'), 'page should contain slash trigger button');
   assert(html.includes('id="commandMenu"'), 'page should contain command menu');
   assert(html.includes('id="historySearchShell"'), 'page should contain persistent history search shell');
@@ -58,7 +63,14 @@ async function checkPageShell() {
   assert(html.includes('id="settingsPanel"'), 'page should contain settingsPanel');
   assert(html.includes('id="settingsContactSelect"'), 'page should contain settingsContactSelect');
   assert(html.includes('id="saveSettingsButton"'), 'page should contain saveSettingsButton');
+  assert(html.includes('id="settingsGroupsSection"'), 'page should contain settingsGroupsSection');
+  assert(html.includes('id="settingsActiveGroupList"'), 'page should contain settingsActiveGroupList');
+  assert(html.includes('id="settingsArchivedGroupList"'), 'page should contain settingsArchivedGroupList');
   assert(html.includes('id="settingsPreferencesSection"'), 'page should contain settingsPreferencesSection');
+  assert(html.includes('id="groupModal"'), 'page should contain groupModal');
+  assert(html.includes('id="groupNameInput"'), 'page should contain groupNameInput');
+  assert(html.includes('id="groupMemberPicker"'), 'page should contain groupMemberPicker');
+  assert(html.includes('id="groupCurrentMembers"'), 'page should contain groupCurrentMembers');
   assert(html.includes('id="settingsThemePresetButtons"'), 'page should contain theme preset selector');
   assert(html.includes('id="settingsThemeDarkButton"'), 'page should contain dark theme button');
   assert(html.includes('id="settingsThemePaperButton"'), 'page should contain paper theme button');
@@ -71,6 +83,13 @@ async function checkPageShell() {
 
   const appJs = await getText('/static/app.js');
   const css = await getText('/static/styles.css');
+  assert(appJs.includes('async function refreshConversations'), 'app.js should include refreshConversations');
+  assert(appJs.includes('function renderConversationList'), 'app.js should include renderConversationList');
+  assert(appJs.includes('function openCreateGroupModal'), 'app.js should include group creation modal logic');
+  assert(appJs.includes('async function openManageCurrentGroup'), 'app.js should include group management logic');
+  assert(appJs.includes('function collectMentionAgentIdsFromComposer'), 'app.js should include mention collection logic');
+  assert(appJs.includes('function renderMentionMenu'), 'app.js should include mention menu rendering');
+  assert(appJs.includes('async function syncCurrentConversation'), 'app.js should include snapshot syncing');
   assert(appJs.includes('HISTORY_SEARCH_RECENTS_STORAGE_KEY'), 'app.js should include history search recent storage key');
   assert(appJs.includes('function createHistorySearchRecentItem'), 'app.js should include history search recent item rendering');
   assert(appJs.includes('function highlightSearchTextInElement'), 'app.js should include history search text highlight helper');
@@ -103,6 +122,10 @@ async function checkPageShell() {
   assert(css.includes('.history-search-result.recent'), 'styles.css should include recent history search list styles');
   assert(css.includes('.history-search-result.recent + .history-search-result.recent'), 'styles.css should include recent search divider styles');
   assert(css.includes('.history-search-highlight'), 'styles.css should include history search keyword highlight styles');
+  assert(css.includes('.mention-menu'), 'styles.css should include mention menu styles');
+  assert(css.includes('.group-modal'), 'styles.css should include group modal styles');
+  assert(css.includes('.settings-group-row'), 'styles.css should include settings group row styles');
+  assert(css.includes('.message-badge.late'), 'styles.css should include late reply badge styles');
   assert(css.includes('.message-row.search-target .message-bubble'), 'styles.css should include search target highlight styles');
   assert(css.includes('.message-list.showing-history-target > :first-child'), 'styles.css should disable bottom anchoring when showing a history target');
   assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
@@ -169,6 +192,13 @@ async function checkSettings() {
     avatarUrl: null
   });
   assert(patched?.userProfile?.displayName === 'Selftest', 'settings patch should persist displayName');
+}
+
+async function checkConversations() {
+  const payload = await getJson('/api/openclaw-webchat/conversations');
+  assert(Array.isArray(payload?.items), 'conversations endpoint should return items');
+  assert(Array.isArray(payload?.agents), 'conversations endpoint should return agents');
+  assert(Array.isArray(payload?.archivedGroups), 'conversations endpoint should return archivedGroups');
 }
 
 async function checkCommandsCatalog() {
@@ -315,6 +345,60 @@ async function checkHistorySearch() {
   assert(payload.results.some((item) => String(item?.excerpt || '').includes(unique) || String(item?.summary || '').includes(unique)), 'history search should find the unique token');
 }
 
+async function checkGroupLifecycle() {
+  const conversations = await getJson('/api/openclaw-webchat/conversations');
+  const agentIds = (conversations?.agents || []).map((item) => item?.agentId).filter(Boolean);
+  assert(agentIds.includes(agentId), 'group lifecycle requires the primary agent to exist');
+  const secondaryAgent = agentIds.find((item) => item !== agentId) || agentId;
+
+  const created = await postJson('/api/openclaw-webchat/groups', {
+    name: `群聊自测 ${unique}`,
+    memberAgentIds: [agentId]
+  });
+  const groupId = created?.group?.groupId;
+  const groupSessionKey = created?.sessionKey;
+  assert(groupId, 'group create should return groupId');
+  assert(groupSessionKey, 'group create should return sessionKey');
+  assert(created?.group?.currentMembers?.some((item) => item.agentId === agentId), 'group should include the initial member');
+
+  const detail = await getJson(`/api/openclaw-webchat/groups/${encodeURIComponent(groupId)}`);
+  assert(detail?.group?.name?.includes(unique), 'group detail should reflect the created name');
+
+  const renamed = await patchJson(`/api/openclaw-webchat/groups/${encodeURIComponent(groupId)}`, {
+    name: `群聊改名 ${unique}`
+  });
+  assert(renamed?.group?.name === `群聊改名 ${unique}`, 'group rename should update the group name');
+
+  if (secondaryAgent !== agentId) {
+    const invited = await postJson(`/api/openclaw-webchat/groups/${encodeURIComponent(groupId)}/members`, {
+      agentIds: [secondaryAgent]
+    });
+    assert(invited?.group?.currentMembers?.some((item) => item.agentId === secondaryAgent), 'group invite should add the secondary member');
+
+    const removed = await deleteJson(`/api/openclaw-webchat/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(secondaryAgent)}`);
+    assert(!removed?.group?.currentMembers?.some((item) => item.agentId === secondaryAgent), 'group remove should drop the secondary member');
+  }
+
+  const sent = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(groupSessionKey)}/send`, {
+    text: `@${agentId} 只回 ${unique}`,
+    mentionAgentIds: [agentId]
+  });
+  assert(sent?.message?.role === 'user', 'group send should immediately record the user message');
+
+  const snapshot = await getJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(groupSessionKey)}/snapshot?limit=50`);
+  assert(snapshot?.kind === 'group', 'group snapshot should report kind=group');
+  assert(snapshot?.history?.messages?.some((item) => item?.id === sent?.message?.id), 'group snapshot should contain the just-sent user message');
+
+  const search = await getJson(`/api/openclaw-webchat/groups/${encodeURIComponent(groupId)}/history/search?q=${encodeURIComponent(unique)}&limit=10`);
+  assert(search?.results?.some((item) => item?.id === sent?.message?.id), 'group history search should find the sent message');
+
+  const dissolved = await postJson(`/api/openclaw-webchat/groups/${encodeURIComponent(groupId)}/dissolve`, {});
+  assert(dissolved?.group?.status === 'dissolved', 'group dissolve should mark the group as dissolved');
+
+  const latestConversations = await getJson('/api/openclaw-webchat/conversations');
+  assert(latestConversations?.archivedGroups?.some((item) => item?.groupId === groupId || item?.id === groupId), 'dissolved group should move to archivedGroups');
+}
+
 function collectText(message) {
   return (message?.blocks || [])
     .filter((block) => block.type === 'text')
@@ -359,6 +443,18 @@ async function patchJson(path, body) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch {}
   assert(response.ok, `PATCH ${path} failed: ${response.status} ${text}`);
+  return data;
+}
+
+async function deleteJson(path) {
+  const response = await fetchWithTimeout(path, {
+    method: 'DELETE',
+    headers: { accept: 'application/json' }
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  assert(response.ok, `DELETE ${path} failed: ${response.status} ${text}`);
   return data;
 }
 

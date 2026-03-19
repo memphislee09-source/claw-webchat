@@ -14,9 +14,15 @@ const THEME_PRESETS = {
 };
 
 const state = {
+  conversations: [],
   agents: [],
+  archivedGroups: [],
+  activeConversationId: null,
+  activeConversationKind: null,
   activeAgentId: null,
   activeSessionKey: null,
+  activeConversationCanSend: false,
+  activeGroupDetail: null,
   messages: [],
   pendingUploads: [],
   nextBefore: null,
@@ -55,6 +61,17 @@ const state = {
   mediaViewerDragStartX: 0,
   mediaViewerDragStartY: 0,
   mediaViewerMoved: false,
+  groupModalOpen: false,
+  groupModalMode: 'create',
+  groupModalGroupId: null,
+  groupModalName: '',
+  groupModalSelectedAgentIds: new Set(),
+  mentionMenuOpen: false,
+  mentionQuery: '',
+  mentionCandidates: [],
+  mentionSelectedIndex: 0,
+  composerMentions: [],
+  composerPreviousValue: '',
   themeChoice: 'dark',
   autoScrollPinned: true,
   userProfile: {
@@ -78,6 +95,7 @@ const historySearchMetaEl = document.getElementById('historySearchMeta');
 const historySearchResultsEl = document.getElementById('historySearchResults');
 const composerFormEl = document.getElementById('composerForm');
 const composerInputEl = document.getElementById('composerInput');
+const mentionMenuEl = document.getElementById('mentionMenu');
 const sendButtonEl = document.getElementById('sendButton');
 const newContextButtonEl = document.getElementById('newContextButton');
 const commandMenuEl = document.getElementById('commandMenu');
@@ -89,14 +107,20 @@ const closeSidebarButtonEl = document.getElementById('closeSidebarButton');
 const sidebarBackdropEl = document.getElementById('sidebarBackdrop');
 const headerRefreshButtonEl = document.getElementById('headerRefreshButton');
 const refreshAgentsButtonEl = document.getElementById('refreshAgentsButton');
+const createGroupButtonEl = document.getElementById('createGroupButton');
+const manageGroupButtonEl = document.getElementById('manageGroupButton');
 const settingsButtonEl = document.getElementById('settingsButton');
 const settingsBackdropEl = document.getElementById('settingsBackdrop');
 const settingsPanelEl = document.getElementById('settingsPanel');
 const closeSettingsButtonEl = document.getElementById('closeSettingsButton');
 const settingsContactsTabEl = document.getElementById('settingsContactsTab');
+const settingsGroupsTabEl = document.getElementById('settingsGroupsTab');
 const settingsPreferencesTabEl = document.getElementById('settingsPreferencesTab');
 const settingsContactsSectionEl = document.getElementById('settingsContactsSection');
+const settingsGroupsSectionEl = document.getElementById('settingsGroupsSection');
 const settingsPreferencesSectionEl = document.getElementById('settingsPreferencesSection');
+const settingsActiveGroupListEl = document.getElementById('settingsActiveGroupList');
+const settingsArchivedGroupListEl = document.getElementById('settingsArchivedGroupList');
 const settingsAvatarPreviewEl = document.getElementById('settingsAvatarPreview');
 const settingsPreviewTitleEl = document.getElementById('settingsPreviewTitle');
 const settingsPreviewSubtitleEl = document.getElementById('settingsPreviewSubtitle');
@@ -114,6 +138,19 @@ const mediaViewerImageEl = document.getElementById('mediaViewerImage');
 const mediaZoomOutButtonEl = document.getElementById('mediaZoomOutButton');
 const mediaResetZoomButtonEl = document.getElementById('mediaResetZoomButton');
 const mediaZoomInButtonEl = document.getElementById('mediaZoomInButton');
+const groupModalBackdropEl = document.getElementById('groupModalBackdrop');
+const groupModalEl = document.getElementById('groupModal');
+const closeGroupModalButtonEl = document.getElementById('closeGroupModalButton');
+const groupModalTitleEl = document.getElementById('groupModalTitle');
+const groupNameInputEl = document.getElementById('groupNameInput');
+const groupMemberPickerEl = document.getElementById('groupMemberPicker');
+const groupCurrentMembersFieldEl = document.getElementById('groupCurrentMembersField');
+const groupCurrentMembersEl = document.getElementById('groupCurrentMembers');
+const createGroupSubmitButtonEl = document.getElementById('createGroupSubmitButton');
+const renameGroupButtonEl = document.getElementById('renameGroupButton');
+const inviteGroupMembersButtonEl = document.getElementById('inviteGroupMembersButton');
+const leaveGroupButtonEl = document.getElementById('leaveGroupButton');
+const dissolveGroupButtonEl = document.getElementById('dissolveGroupButton');
 const appShellEl = document.querySelector('.app-shell');
 
 state.themeChoice = getStoredThemeChoice();
@@ -128,7 +165,7 @@ async function boot() {
     loadSettings(),
     loadCommandCatalog()
   ]);
-  await refreshAgents({ autoOpen: true });
+  await refreshConversations({ autoOpen: true });
   startPolling();
 }
 
@@ -140,15 +177,19 @@ function bindEvents() {
   historySearchFormEl?.addEventListener('submit', handleHistorySearchSubmit);
   historySearchInputEl?.addEventListener('focus', handleHistorySearchFocus);
   historySearchInputEl?.addEventListener('input', handleHistorySearchInput);
-  headerRefreshButtonEl.addEventListener('click', () => refreshAgents({ autoOpen: false, refreshCurrent: true }));
-  refreshAgentsButtonEl?.addEventListener('click', () => refreshAgents({ autoOpen: false, refreshCurrent: true }));
+  headerRefreshButtonEl.addEventListener('click', () => refreshConversations({ autoOpen: false, refreshCurrent: true }));
+  refreshAgentsButtonEl?.addEventListener('click', () => refreshConversations({ autoOpen: false, refreshCurrent: true }));
+  createGroupButtonEl?.addEventListener('click', openCreateGroupModal);
+  manageGroupButtonEl?.addEventListener('click', openManageCurrentGroup);
   attachButtonEl.addEventListener('click', () => mediaUploadInputEl.click());
   mediaUploadInputEl.addEventListener('change', handleFileSelection);
-  composerInputEl.addEventListener('input', autoResizeComposer);
+  composerInputEl.addEventListener('input', handleComposerInput);
+  composerInputEl.addEventListener('keydown', handleComposerKeydown);
+  composerInputEl.addEventListener('click', updateMentionMenuFromSelection);
   messageListEl.addEventListener('scroll', async () => {
     state.autoScrollPinned = isNearBottom();
     if (messageListEl.scrollTop > 64) return;
-    if (!state.activeAgentId || !state.hasMore || state.loadingHistory) return;
+    if (!state.activeConversationId || !state.hasMore || state.loadingHistory) return;
     await loadOlderHistory();
   });
 
@@ -160,6 +201,7 @@ function bindEvents() {
   closeSettingsButtonEl.addEventListener('click', () => toggleSettingsPanel(false));
   settingsBackdropEl.addEventListener('click', () => toggleSettingsPanel(false));
   settingsContactsTabEl.addEventListener('click', () => switchSettingsTab('contacts'));
+  settingsGroupsTabEl?.addEventListener('click', () => switchSettingsTab('groups'));
   settingsPreferencesTabEl.addEventListener('click', () => switchSettingsTab('preferences'));
   settingsContactSelectEl.addEventListener('change', () => loadSettingsDraft(settingsContactSelectEl.value));
   settingsDisplayNameInputEl.addEventListener('input', () => {
@@ -171,6 +213,16 @@ function bindEvents() {
   settingsAvatarFileInputEl.addEventListener('change', handleSettingsAvatarSelection);
   saveSettingsButtonEl.addEventListener('click', saveSettingsContact);
   settingsThemePresetButtonsEl?.addEventListener('click', handleThemePresetClick);
+  closeGroupModalButtonEl?.addEventListener('click', () => toggleGroupModal(false));
+  groupModalBackdropEl?.addEventListener('click', () => toggleGroupModal(false));
+  groupNameInputEl?.addEventListener('input', () => {
+    state.groupModalName = groupNameInputEl.value;
+  });
+  createGroupSubmitButtonEl?.addEventListener('click', submitCreateGroup);
+  renameGroupButtonEl?.addEventListener('click', submitRenameGroup);
+  inviteGroupMembersButtonEl?.addEventListener('click', submitInviteGroupMembers);
+  leaveGroupButtonEl?.addEventListener('click', leaveCurrentGroup);
+  dissolveGroupButtonEl?.addEventListener('click', dissolveCurrentGroup);
   mediaViewerEl.addEventListener('click', closeMediaViewer);
   mediaViewerEl.addEventListener('wheel', handleMediaViewerWheel, { passive: false });
   mediaViewerImageEl.addEventListener('click', handleMediaViewerImageClick);
@@ -277,31 +329,31 @@ function normalizeHistorySearchRecentQueries(list) {
     .slice(0, HISTORY_SEARCH_MAX_RECENTS);
 }
 
-function syncHistorySearchRecentQueries(agentId = state.activeAgentId) {
-  if (!agentId) {
+function syncHistorySearchRecentQueries(scopeKey = getActiveHistorySearchScopeKey()) {
+  if (!scopeKey) {
     state.historySearchRecentQueries = [];
     return;
   }
 
   const store = getStoredHistorySearchRecentStore();
-  state.historySearchRecentQueries = normalizeHistorySearchRecentQueries(store[agentId]);
+  state.historySearchRecentQueries = normalizeHistorySearchRecentQueries(store[scopeKey]);
 }
 
-function recordHistorySearchRecentQuery(agentId, query) {
+function recordHistorySearchRecentQuery(scopeKey, query) {
   const normalized = String(query || '').trim();
-  if (!agentId || !normalized) return;
+  if (!scopeKey || !normalized) return;
 
   const store = getStoredHistorySearchRecentStore();
-  const existing = normalizeHistorySearchRecentQueries(store[agentId]);
+  const existing = normalizeHistorySearchRecentQueries(store[scopeKey]);
   const next = [
     normalized,
     ...existing.filter((item) => item.toLowerCase() !== normalized.toLowerCase())
   ].slice(0, HISTORY_SEARCH_MAX_RECENTS);
 
-  store[agentId] = next;
+  store[scopeKey] = next;
   persistHistorySearchRecentStore(store);
 
-  if (state.activeAgentId === agentId) {
+  if (getActiveHistorySearchScopeKey() === scopeKey) {
     state.historySearchRecentQueries = next;
   }
 }
@@ -327,72 +379,79 @@ function renderThemePresetControls() {
   }
 }
 
-async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) {
-  const previousActive = state.activeAgentId;
-  const previousActiveAgent = previousActive
-    ? state.agents.find((item) => item.agentId === previousActive) || null
-    : null;
-  const data = await apiGet('/api/openclaw-webchat/agents');
+async function refreshConversations({ autoOpen = false, refreshCurrent = false } = {}) {
+  const previousActiveKind = state.activeConversationKind;
+  const previousActiveId = state.activeConversationId;
+  const previousActive = getActiveConversation();
+  const data = await apiGet('/api/openclaw-webchat/conversations');
+  state.conversations = Array.isArray(data.items) ? data.items : [];
   state.agents = Array.isArray(data.agents) ? data.agents : [];
-  renderAgentList({ refreshIdentity: false });
+  state.archivedGroups = Array.isArray(data.archivedGroups) ? data.archivedGroups : [];
+  renderConversationList({ refreshIdentity: false });
   updateHeader();
   populateSettingsForm();
+  renderSettingsGroupLists();
 
-  const nextAgentId = previousActive && state.agents.some((item) => item.agentId === previousActive)
-    ? previousActive
-    : state.agents[0]?.agentId || null;
+  const activeStillVisible = previousActiveId && state.conversations.some((item) => item.kind === previousActiveKind && item.id === previousActiveId);
 
-  if (refreshCurrent && previousActive) {
-    await openAgent(previousActive, { forceReload: true, preserveScrollBottom: true });
+  if (refreshCurrent && previousActiveId) {
+    await openConversation(previousActiveKind, previousActiveId, { forceReload: true, preserveScrollBottom: true });
     return;
   }
 
-  const nextActiveAgent = nextAgentId
-    ? state.agents.find((item) => item.agentId === nextAgentId) || null
-    : null;
+  const nextItem = activeStillVisible
+    ? state.conversations.find((item) => item.kind === previousActiveKind && item.id === previousActiveId) || null
+    : state.conversations[0] || null;
 
   if (
     !autoOpen
     && previousActive
-    && nextActiveAgent
-    && shouldRefreshCurrentConversation(previousActiveAgent, nextActiveAgent)
+    && nextItem
+    && shouldRefreshCurrentConversation(previousActive, nextItem)
   ) {
-    await openAgent(previousActive, { forceReload: true, preserveScrollBottom: true });
+    await openConversation(nextItem.kind, nextItem.id, { forceReload: true, preserveScrollBottom: true });
     return;
   }
 
-  if (autoOpen && nextAgentId) {
-    await openAgent(nextAgentId, { forceReload: previousActive !== nextAgentId || !state.activeSessionKey });
+  if (autoOpen && nextItem) {
+    await openConversation(nextItem.kind, nextItem.id, {
+      forceReload: previousActiveId !== nextItem.id || previousActiveKind !== nextItem.kind || !state.activeSessionKey
+    });
   }
 }
 
-function shouldRefreshCurrentConversation(previousAgent, nextAgent) {
-  if (!previousAgent || !nextAgent) return false;
-  if (previousAgent.agentId !== nextAgent.agentId) return false;
-  if (isActiveSessionBusy()) return false;
-
-  return previousAgent.lastMessageAt !== nextAgent.lastMessageAt
-    || previousAgent.summary !== nextAgent.summary
-    || previousAgent.presence !== nextAgent.presence;
+async function refreshAgents(options = {}) {
+  return refreshConversations(options);
 }
 
-function renderAgentList({ refreshIdentity = true } = {}) {
-  if (!state.agents.length) {
+function shouldRefreshCurrentConversation(previousItem, nextItem) {
+  if (!previousItem || !nextItem) return false;
+  if (previousItem.kind !== nextItem.kind || previousItem.id !== nextItem.id) return false;
+  if (isActiveSessionBusy()) return false;
+
+  return previousItem.lastMessageAt !== nextItem.lastMessageAt
+    || previousItem.summary !== nextItem.summary
+    || previousItem.presence !== nextItem.presence;
+}
+
+function renderConversationList({ refreshIdentity = true } = {}) {
+  if (!state.conversations.length) {
     agentListEl.innerHTML = '';
     const empty = document.createElement('div');
     empty.className = 'empty-tip';
-    empty.textContent = '暂未发现 agent。';
+    empty.textContent = '暂时还没有会话。';
     agentListEl.append(empty);
     return;
   }
 
   agentListEl.querySelectorAll('.empty-tip').forEach((node) => node.remove());
-  const existing = new Map(Array.from(agentListEl.querySelectorAll('.agent-card')).map((button) => [button.dataset.agentId, button]));
+  const existing = new Map(Array.from(agentListEl.querySelectorAll('.agent-card')).map((button) => [button.dataset.itemKey, button]));
 
-  for (const agent of state.agents) {
-    const button = existing.get(agent.agentId) || createAgentCardElement(agent);
-    existing.delete(agent.agentId);
-    updateAgentCardElement(button, agent, {
+  for (const item of state.conversations) {
+    const itemKey = toConversationKey(item.kind, item.id);
+    const button = existing.get(itemKey) || createConversationCardElement(item);
+    existing.delete(itemKey);
+    updateConversationCardElement(button, item, {
       refreshIdentity: refreshIdentity || !button.isConnected
     });
     agentListEl.append(button);
@@ -401,19 +460,14 @@ function renderAgentList({ refreshIdentity = true } = {}) {
   existing.forEach((button) => button.remove());
 }
 
-function createAgentCardElement(agent) {
+function createConversationCardElement(item) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.dataset.agentId = agent.agentId;
+  button.dataset.itemKey = toConversationKey(item.kind, item.id);
   button.className = 'agent-card';
-  button.addEventListener('click', () => openAgent(agent.agentId, { forceReload: agent.agentId !== state.activeAgentId }));
+  button.addEventListener('click', () => openConversation(item.kind, item.id, { forceReload: item.id !== state.activeConversationId || item.kind !== state.activeConversationKind }));
 
-  const avatar = createAvatarElement({
-    className: 'agent-avatar',
-    avatarUrl: agent.avatarUrl,
-    label: agent.name || agent.agentId,
-    fallbackText: (agent.name || agent.agentId || '?').slice(0, 1).toUpperCase()
-  });
+  const avatar = createConversationAvatar(item);
 
   const content = document.createElement('div');
   content.className = 'agent-content';
@@ -449,36 +503,38 @@ function createAgentCardElement(agent) {
   content.append(topRow, bottomRow);
   button.append(avatar, content);
   button._agentRefs = { avatar, name, presence, presenceLabel, summary, time };
-  updateAgentCardElement(button, agent, { refreshIdentity: true });
+  updateConversationCardElement(button, item, { refreshIdentity: true });
   return button;
 }
 
-function updateAgentCardElement(button, agent, { refreshIdentity = true } = {}) {
+function updateConversationCardElement(button, item, { refreshIdentity = true } = {}) {
   const refs = button._agentRefs;
   if (!refs) return;
 
-  button.classList.toggle('active', agent.agentId === state.activeAgentId);
-  button.dataset.agentId = agent.agentId;
+  button.classList.toggle('active', item.kind === state.activeConversationKind && item.id === state.activeConversationId);
+  button.dataset.itemKey = toConversationKey(item.kind, item.id);
 
   if (refreshIdentity) {
-    updateAgentCardIdentity(button, agent);
+    updateConversationCardIdentity(button, item);
   }
 
-  const presenceState = normalizePresence(agent.presence);
+  const presenceState = normalizePresence(item.presence);
   refs.presence.className = `presence-dot ${presenceState}`;
-  refs.presence.title = formatPresenceLabel(agent.presence);
-  refs.presenceLabel.textContent = formatPresenceLabel(agent.presence);
-  refs.summary.textContent = agent.summary || '点击进入会话';
-  refs.time.textContent = formatAgentTimestamp(agent.lastMessageAt);
+  refs.presence.title = formatPresenceLabel(item.presence);
+  refs.presenceLabel.textContent = item.kind === 'group'
+    ? `${item.memberCount || 0} 人 · ${formatPresenceLabel(item.presence)}`
+    : formatPresenceLabel(item.presence);
+  refs.summary.textContent = item.summary || (item.kind === 'group' ? '点击进入群聊' : '点击进入会话');
+  refs.time.textContent = formatAgentTimestamp(item.lastMessageAt);
 }
 
-function updateAgentCardIdentity(button, agent) {
+function updateConversationCardIdentity(button, item) {
   const refs = button._agentRefs;
   if (!refs) return;
 
-  const nextLabel = agent.name || agent.agentId;
-  const nextAvatarUrl = agent.avatarUrl || '';
-  const nextFallback = (nextLabel || '?').slice(0, 1).toUpperCase();
+  const nextLabel = item.name || item.title || item.id;
+  const nextAvatarUrl = item.avatarUrl || '';
+  const nextFallback = item.kind === 'group' ? '群' : (nextLabel || '?').slice(0, 1).toUpperCase();
 
   refs.name.textContent = nextLabel;
 
@@ -486,39 +542,59 @@ function updateAgentCardIdentity(button, agent) {
     return;
   }
 
-  const nextAvatar = createAvatarElement({
-    className: 'agent-avatar',
-    avatarUrl: agent.avatarUrl,
-    label: nextLabel,
-    fallbackText: nextFallback
-  });
+  const nextAvatar = createConversationAvatar(item);
   refs.avatar.replaceWith(nextAvatar);
   refs.avatar = nextAvatar;
   button.dataset.avatarUrl = nextAvatarUrl;
   button.dataset.agentLabel = nextLabel;
 }
 
-async function openAgent(agentId, { forceReload = false, preserveScrollBottom = false } = {}) {
-  if (!agentId) return;
-  if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
-  if (state.activeAgentId !== agentId) {
+function createConversationAvatar(item) {
+  if (item.kind === 'group') {
+    const avatar = document.createElement('div');
+    avatar.className = 'agent-avatar group-avatar';
+    avatar.textContent = '群';
+    return avatar;
+  }
+
+  return createAvatarElement({
+    className: 'agent-avatar',
+    avatarUrl: item.avatarUrl,
+    label: item.name || item.id,
+    fallbackText: (item.name || item.id || '?').slice(0, 1).toUpperCase()
+  });
+}
+
+async function openConversation(kind, id, { forceReload = false, preserveScrollBottom = false } = {}) {
+  if (!id || !kind) return;
+  if (state.selectedOpenPromise && state.activeConversationKind === kind && state.activeConversationId === id && !forceReload) {
+    return state.selectedOpenPromise;
+  }
+  if (state.activeConversationKind !== kind || state.activeConversationId !== id) {
     resetHistorySearch({ keepOpen: false });
+    closeMentionMenu();
   }
 
   const requestId = state.openRequestId + 1;
   state.openRequestId = requestId;
-  state.activeAgentId = agentId;
-  syncHistorySearchRecentQueries(agentId);
-  renderAgentList({ refreshIdentity: false });
+  state.activeConversationKind = kind;
+  state.activeConversationId = id;
+  state.activeAgentId = kind === 'agent' ? id : null;
+  syncHistorySearchRecentQueries();
+  renderConversationList({ refreshIdentity: false });
   updateHeader();
   populateSettingsForm();
-  showStatus('正在打开会话…', 'info');
+  showStatus(kind === 'group' ? '正在打开群聊…' : '正在打开会话…', 'info');
   toggleSidebar(false);
 
   const promise = (async () => {
-    const response = await apiPost(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/open`, {});
-    if (requestId !== state.openRequestId || state.activeAgentId !== agentId) return;
+    const response = kind === 'group'
+      ? await apiPost(`/api/openclaw-webchat/groups/${encodeURIComponent(id)}/open`, {})
+      : await apiPost(`/api/openclaw-webchat/agents/${encodeURIComponent(id)}/open`, {});
+    if (requestId !== state.openRequestId || state.activeConversationKind !== kind || state.activeConversationId !== id) return;
     state.activeSessionKey = response.sessionKey;
+    state.activeConversationCanSend = response?.group ? response.group.canSend !== false : true;
+    state.activeGroupDetail = kind === 'group' ? (response.group || null) : null;
     state.messages = Array.isArray(response.history?.messages) ? response.history.messages : [];
     state.nextBefore = response.history?.nextBefore || null;
     state.hasMore = Boolean(response.history?.hasMore);
@@ -531,7 +607,9 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
     } else {
       maybeScrollMessagesToBottom();
     }
-    showStatus(response.created ? '已创建并进入该 agent 的长期主时间线。' : '会话已恢复。', 'success');
+    showStatus(kind === 'group'
+      ? '群聊已打开。'
+      : (response.created ? '已创建并进入该 agent 的长期主时间线。' : '会话已恢复。'), 'success');
   })();
 
   state.selectedOpenPromise = promise;
@@ -541,6 +619,10 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   } finally {
     state.selectedOpenPromise = null;
   }
+}
+
+async function openAgent(agentId, options = {}) {
+  return openConversation('agent', agentId, options);
 }
 
 function setHistorySearchOpen(open) {
@@ -575,18 +657,18 @@ function renderHistorySearchPanel() {
   }
 
   if (historySearchInputEl) {
-    historySearchInputEl.disabled = !state.activeAgentId;
-    historySearchInputEl.placeholder = state.activeAgentId ? '搜索当前会话历史' : '先打开一个 agent 再搜索';
+    historySearchInputEl.disabled = !state.activeConversationId;
+    historySearchInputEl.placeholder = state.activeConversationId ? '搜索当前会话历史' : '先打开一个会话再搜索';
   }
 
-  historySearchSubmitButtonEl.disabled = !state.activeAgentId || state.historySearchLoading;
+  historySearchSubmitButtonEl.disabled = !state.activeConversationId || state.historySearchLoading;
 
   if (!state.historySearchOpen) return;
 
-  if (!state.activeAgentId) {
-    historySearchMetaEl.textContent = '请先打开一个 agent 会话，再搜索该时间线中的历史消息。';
+  if (!state.activeConversationId) {
+    historySearchMetaEl.textContent = '请先打开一个会话，再搜索该时间线中的历史消息。';
   } else if (state.historySearchLoading) {
-    historySearchMetaEl.textContent = '正在搜索当前 agent 的历史消息…';
+    historySearchMetaEl.textContent = '正在搜索当前会话的历史消息…';
   } else if (state.historySearchError) {
     historySearchMetaEl.textContent = state.historySearchError;
   } else if (state.historySearchShowingRecents && state.historySearchRecentQueries.length) {
@@ -644,7 +726,7 @@ function createHistorySearchResultItem(result) {
 
   const role = document.createElement('div');
   role.className = 'history-search-role';
-  role.textContent = getHistorySearchResultSpeakerName(result.role);
+  role.textContent = result.speakerName || getHistorySearchResultSpeakerName(result.role);
 
   const time = document.createElement('div');
   time.className = 'history-search-time';
@@ -679,11 +761,13 @@ function createHistorySearchRecentItem(query) {
 }
 
 function getHistorySearchResultSpeakerName(role) {
+  const activeConversation = getActiveConversation();
   if (role === 'user') {
     return state.userProfile.displayName || '我';
   }
 
   if (role === 'assistant') {
+    if (activeConversation?.kind === 'group') return '群成员';
     const active = getActiveAgent();
     return active?.name || active?.agentId || 'Assistant';
   }
@@ -696,7 +780,7 @@ function getHistorySearchResultSpeakerName(role) {
 }
 
 function handleHistorySearchFocus() {
-  if (!state.activeAgentId) return;
+  if (!state.activeConversationId) return;
   syncHistorySearchRecentQueries();
   state.historySearchShowingRecents = state.historySearchRecentQueries.length > 0;
   setHistorySearchOpen(true);
@@ -711,7 +795,7 @@ function applyHistorySearchRecentQuery(query) {
 }
 
 function handleHistorySearchInput() {
-  if (!state.activeAgentId) return;
+  if (!state.activeConversationId) return;
 
   const query = historySearchInputEl?.value || '';
   state.historySearchQuery = query;
@@ -737,7 +821,7 @@ function handleHistorySearchInput() {
 
 async function handleHistorySearchSubmit(event) {
   event.preventDefault();
-  if (!state.activeAgentId) return;
+  if (!state.activeConversationId) return;
   setHistorySearchOpen(true);
 
   const query = historySearchInputEl?.value.trim() || '';
@@ -769,11 +853,11 @@ async function executeHistorySearch(query) {
   renderHistorySearchPanel();
 
   try {
-    const payload = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(state.activeAgentId)}/history/search?q=${encodeURIComponent(normalizedQuery)}&limit=20`);
-    if (requestId !== state.historySearchRequestId || !state.activeAgentId) return;
+    const payload = await apiGet(buildHistorySearchUrl(normalizedQuery));
+    if (requestId !== state.historySearchRequestId || !state.activeConversationId) return;
     state.historySearchResults = Array.isArray(payload?.results) ? payload.results : [];
     state.historySearchTotal = Number(payload?.total) || state.historySearchResults.length;
-    recordHistorySearchRecentQuery(state.activeAgentId, normalizedQuery);
+    recordHistorySearchRecentQuery(getActiveHistorySearchScopeKey(), normalizedQuery);
   } catch (error) {
     if (requestId !== state.historySearchRequestId) return;
     state.historySearchResults = [];
@@ -788,7 +872,7 @@ async function executeHistorySearch(query) {
 }
 
 async function jumpToHistorySearchResult(messageId) {
-  if (!messageId || !state.activeAgentId) return;
+  if (!messageId || !state.activeConversationId) return;
   showStatus('正在定位命中消息…', 'info');
 
   const found = await ensureHistoryMessageLoaded(messageId);
@@ -810,14 +894,15 @@ async function jumpToHistorySearchResult(messageId) {
 
 async function ensureHistoryMessageLoaded(messageId) {
   if (state.messages.some((item) => item.id === messageId)) return true;
-  if (!state.activeAgentId) return false;
+  if (!state.activeConversationId) return false;
 
-  const targetAgentId = state.activeAgentId;
+  const targetConversationKind = state.activeConversationKind;
+  const targetConversationId = state.activeConversationId;
   const targetSessionKey = state.activeSessionKey;
 
   while (!state.messages.some((item) => item.id === messageId) && state.hasMore && state.nextBefore) {
-    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(targetAgentId)}/history?limit=30&before=${encodeURIComponent(state.nextBefore)}`);
-    if (!isOperationContextActive({ agentId: targetAgentId, sessionKey: targetSessionKey })) return false;
+    const data = await apiGet(buildHistoryPageUrl(targetConversationKind, targetConversationId, state.nextBefore));
+    if (!isOperationContextActive({ kind: targetConversationKind, id: targetConversationId, sessionKey: targetSessionKey })) return false;
     const incoming = Array.isArray(data.messages) ? data.messages : [];
     state.messages = [...incoming, ...state.messages];
     state.nextBefore = data.nextBefore || null;
@@ -866,9 +951,25 @@ function renderMessages() {
     row.className = `message-row ${message.role}${message.id === state.historySearchActiveMessageId ? ' search-target' : ''}`;
     row.dataset.messageId = message.id;
 
-    const avatar = createMessageAvatar(message.role);
+    let avatar = createMessageAvatar(message.role);
+    if (getActiveConversation()?.kind === 'group' && message.role === 'assistant') {
+      const speaker = findAgentById(message.speakerId);
+      avatar = createAvatarElement({
+        className: 'message-avatar assistant',
+        avatarUrl: speaker?.avatarUrl,
+        label: message.speakerName || speaker?.name || message.speakerId || 'A',
+        fallbackText: (message.speakerName || speaker?.name || message.speakerId || 'A').slice(0, 1).toUpperCase()
+      });
+    }
     const body = document.createElement('div');
     body.className = 'message-body';
+
+    if (getActiveConversation()?.kind === 'group' && message.role === 'assistant') {
+      const sender = document.createElement('div');
+      sender.className = 'message-sender';
+      sender.textContent = message.speakerName || findAgentById(message.speakerId)?.name || '群成员';
+      body.append(sender);
+    }
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
@@ -913,12 +1014,33 @@ function renderMessages() {
     time.className = 'message-time';
     time.textContent = formatTime(message.createdAt);
 
+    if (message.late || message.replyToPreview) {
+      const meta = document.createElement('div');
+      meta.className = 'message-meta-row';
+      if (message.late) {
+        const badge = document.createElement('span');
+        badge.className = 'message-badge late';
+        badge.textContent = '迟到回复';
+        meta.append(badge);
+      }
+      if (message.replyToPreview) {
+        const reply = document.createElement('span');
+        reply.className = 'message-reply-target';
+        reply.textContent = `回应：${message.replyToPreview}`;
+        meta.append(reply);
+      }
+      body.append(meta);
+    }
+
     body.append(bubble, time);
     row.append(avatar, body);
     messageListEl.append(row);
   }
 
-  if (isActiveSessionBusy()) {
+  const processingRows = createConversationProcessingRows();
+  if (processingRows.length) {
+    processingRows.forEach((row) => messageListEl.append(row));
+  } else if (shouldShowConversationProcessing()) {
     messageListEl.append(createAssistantProcessingRow());
   }
 }
@@ -1157,16 +1279,17 @@ function shouldUseVisualMediaBubble(blocks) {
 }
 
 async function loadOlderHistory() {
-  if (!state.activeAgentId || !state.nextBefore || state.loadingHistory) return;
-  const targetAgentId = state.activeAgentId;
+  if (!state.activeConversationId || !state.nextBefore || state.loadingHistory) return;
+  const targetConversationKind = state.activeConversationKind;
+  const targetConversationId = state.activeConversationId;
   const targetSessionKey = state.activeSessionKey;
   const targetBefore = state.nextBefore;
   state.loadingHistory = true;
   const previousHeight = messageListEl.scrollHeight;
 
   try {
-    const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(targetAgentId)}/history?limit=30&before=${encodeURIComponent(targetBefore)}`);
-    if (!isOperationContextActive({ agentId: targetAgentId, sessionKey: targetSessionKey })) return;
+    const data = await apiGet(buildHistoryPageUrl(targetConversationKind, targetConversationId, targetBefore));
+    if (!isOperationContextActive({ kind: targetConversationKind, id: targetConversationId, sessionKey: targetSessionKey })) return;
     const incoming = Array.isArray(data.messages) ? data.messages : [];
     state.messages = [...incoming, ...state.messages];
     state.nextBefore = data.nextBefore || null;
@@ -1184,8 +1307,12 @@ async function handleSendSubmit(event) {
   if (!state.activeSessionKey || isActiveSessionBusy()) return;
 
   const targetSessionKey = state.activeSessionKey;
-  const targetAgentId = state.activeAgentId;
-  const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
+  const context = {
+    kind: state.activeConversationKind,
+    id: state.activeConversationId,
+    agentId: state.activeAgentId,
+    sessionKey: targetSessionKey
+  };
 
   const text = composerInputEl.value.trim();
   if (!text && !state.pendingUploads.length) return;
@@ -1199,6 +1326,7 @@ async function handleSendSubmit(event) {
     return;
   }
 
+  const mentionAgentIds = collectMentionAgentIdsFromComposer(text);
   beginSessionActivity(targetSessionKey);
   showContextStatus(context, getSendingStatusMessage(), 'info');
 
@@ -1216,12 +1344,18 @@ async function handleSendSubmit(event) {
     id: `local-${Date.now()}`,
     role: 'user',
     createdAt: new Date().toISOString(),
+    speakerName: state.userProfile.displayName || '我',
+    mentionAgentIds,
     blocks: buildOptimisticBlocks(text, state.pendingUploads)
   };
   const draftText = text;
   const draftAttachments = state.pendingUploads;
+  const draftMentions = [...state.composerMentions];
   state.messages.push(optimistic);
   composerInputEl.value = '';
+  state.composerPreviousValue = '';
+  state.composerMentions = [];
+  closeMentionMenu();
   mediaUploadInputEl.value = '';
   state.pendingUploads = [];
   renderPendingUploads();
@@ -1232,21 +1366,22 @@ async function handleSendSubmit(event) {
   try {
     const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/send`, {
       text,
-      blocks: uploadedBlocks
+      blocks: uploadedBlocks,
+      mentionAgentIds
     });
-    if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
     releasePendingUploads(draftAttachments);
     if (isOperationContextActive(context)) {
-      renderMessages();
-      maybeScrollMessagesToBottom();
+      await syncCurrentConversation({ preserveScrollBottom: true });
     }
     showContextStatus(context, '发送完成。', 'success');
-    await refreshAgents({ autoOpen: false });
+    await refreshConversations({ autoOpen: false });
   } catch (error) {
     if (isOperationContextActive(context)) {
       state.messages = state.messages.filter((item) => item.id !== optimistic.id);
       composerInputEl.value = draftText;
+      state.composerPreviousValue = draftText;
       state.pendingUploads = draftAttachments;
+      state.composerMentions = draftMentions;
       renderPendingUploads();
       autoResizeComposer();
       renderMessages();
@@ -1390,6 +1525,10 @@ function handleGlobalDocumentClick(event) {
   if (state.historySearchOpen && historySearchShellEl && !historySearchShellEl.contains(target) && !path.includes(historySearchShellEl)) {
     setHistorySearchOpen(false);
   }
+
+  if (state.mentionMenuOpen && mentionMenuEl && !mentionMenuEl.contains(target) && target !== composerInputEl) {
+    closeMentionMenu();
+  }
 }
 
 function setCommandMenuOpen(open) {
@@ -1450,20 +1589,22 @@ function getCommandCategoryLabel(category) {
 async function executeSlashCommand(command) {
   if (!state.activeSessionKey || isActiveSessionBusy()) return;
   const targetSessionKey = state.activeSessionKey;
-  const targetAgentId = state.activeAgentId;
-  const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
+  const context = {
+    kind: state.activeConversationKind,
+    id: state.activeConversationId,
+    agentId: state.activeAgentId,
+    sessionKey: targetSessionKey
+  };
   beginSessionActivity(targetSessionKey);
   showContextStatus(context, `正在执行 ${command.split(/\s+/, 1)[0]}…`, 'info');
 
   try {
-    const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/command`, { command });
-    if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
+    await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/command`, { command });
     if (isOperationContextActive(context)) {
-      renderMessages();
-      maybeScrollMessagesToBottom(true);
+      await syncCurrentConversation({ preserveScrollBottom: false });
     }
     showContextStatus(context, buildSlashCommandSuccessMessage(command), 'success');
-    await refreshAgents({ autoOpen: false });
+    await refreshConversations({ autoOpen: false });
   } catch (error) {
     showContextStatus(context, `命令失败：${formatError(error)}`, 'error');
   } finally {
@@ -1498,18 +1639,25 @@ function isWhitelistedSlash(commandName) {
 }
 
 function updateHeader() {
-  const active = getActiveAgent();
-  chatTitleEl.textContent = active?.name || 'openclaw-webchat';
-  chatSubtitleEl.textContent = active
-    ? `${active.hasSession ? '长期主时间线' : '点击后自动创建'} · ${active.summary || '暂无摘要'}`
-    : '选择 agent 开始聊天';
+  const active = getActiveConversation();
+  chatTitleEl.textContent = active?.title || active?.name || 'openclaw-webchat';
+  if (active?.kind === 'group') {
+    const statusText = active?.archived ? '只读群历史' : `${active.memberCount || 0} 位成员`;
+    chatSubtitleEl.textContent = `${statusText} · ${active.summary || '暂无摘要'}`;
+  } else {
+    chatSubtitleEl.textContent = active
+      ? `${active.hasSession ? '长期主时间线' : '点击后自动创建'} · ${active.summary || '暂无摘要'}`
+      : '选择会话开始聊天';
+  }
   headerPresenceEl.className = `presence-dot ${normalizePresence(active?.presence || 'idle')}`;
+  manageGroupButtonEl?.classList.toggle('hidden', !(active?.kind === 'group'));
   if (!active) {
     state.historySearchOpen = false;
     state.historySearchRecentQueries = [];
     state.historySearchShowingRecents = false;
   }
   renderHistorySearchPanel();
+  syncComposerInteractivity();
 }
 
 function createAvatarElement({ className, avatarUrl, label, fallbackText }) {
@@ -1566,6 +1714,49 @@ function createAssistantProcessingRow() {
   }
 
   row.append(avatar, indicator);
+  return row;
+}
+
+function createConversationProcessingRows() {
+  const activeConversation = getActiveConversation();
+  if (activeConversation?.kind !== 'group') return [];
+  const members = Array.isArray(state.activeGroupDetail?.currentMembers) ? state.activeGroupDetail.currentMembers : [];
+  return members
+    .filter((member) => member.replyState === 'running')
+    .map((member) => createGroupMemberProcessingRow(member));
+}
+
+function createGroupMemberProcessingRow(member) {
+  const row = document.createElement('div');
+  row.className = 'message-row assistant processing';
+
+  const avatar = createAvatarElement({
+    className: 'message-avatar assistant',
+    avatarUrl: member.avatarUrl,
+    label: member.name || member.agentId || 'A',
+    fallbackText: (member.name || member.agentId || 'A').slice(0, 1).toUpperCase()
+  });
+
+  const body = document.createElement('div');
+  body.className = 'message-body';
+
+  const sender = document.createElement('div');
+  sender.className = 'message-sender';
+  sender.textContent = member.name || member.agentId || '群成员';
+
+  const indicator = document.createElement('div');
+  indicator.className = 'processing-indicator';
+  indicator.setAttribute('aria-label', `${member.name || member.agentId || '群成员'} 正在处理`);
+
+  for (let index = 0; index < 3; index += 1) {
+    const dot = document.createElement('span');
+    dot.className = 'processing-indicator-dot';
+    dot.style.animationDelay = `${index * 0.14}s`;
+    indicator.append(dot);
+  }
+
+  body.append(sender, indicator);
+  row.append(avatar, body);
   return row;
 }
 
@@ -2092,6 +2283,14 @@ function handleWindowKeydown(event) {
   }
 
   if (event.key === 'Escape') {
+    if (state.groupModalOpen) {
+      toggleGroupModal(false);
+      return;
+    }
+    if (state.mentionMenuOpen) {
+      closeMentionMenu();
+      return;
+    }
     if (state.historySearchOpen) {
       setHistorySearchOpen(false);
       historySearchInputEl?.blur();
@@ -2143,20 +2342,27 @@ function populateSettingsForm({ resetDraft = false } = {}) {
 
 function renderSettingsTabs() {
   const isContacts = state.settingsExpandedSection === 'contacts';
+  const isGroups = state.settingsExpandedSection === 'groups';
   const isPreferences = state.settingsExpandedSection === 'preferences';
   settingsContactsTabEl.classList.toggle('active', isContacts);
+  settingsGroupsTabEl?.classList.toggle('active', isGroups);
   settingsPreferencesTabEl.classList.toggle('active', isPreferences);
   settingsContactsTabEl.setAttribute('aria-expanded', isContacts ? 'true' : 'false');
+  settingsGroupsTabEl?.setAttribute('aria-expanded', isGroups ? 'true' : 'false');
   settingsPreferencesTabEl.setAttribute('aria-expanded', isPreferences ? 'true' : 'false');
   settingsContactsSectionEl.hidden = !isContacts;
+  settingsGroupsSectionEl.hidden = !isGroups;
   settingsPreferencesSectionEl.hidden = !isPreferences;
 }
 
 function switchSettingsTab(tab) {
-  const next = tab === 'preferences' ? 'preferences' : 'contacts';
+  const next = tab === 'preferences' ? 'preferences' : tab === 'groups' ? 'groups' : 'contacts';
   state.settingsExpandedSection = state.settingsExpandedSection === next ? null : next;
   if (state.settingsExpandedSection === 'contacts' && !state.settingsSelectedContactKey) {
     loadSettingsDraft(getDefaultSettingsContactKey());
+  }
+  if (state.settingsExpandedSection === 'groups') {
+    renderSettingsGroupLists();
   }
   renderSettingsTabs();
 }
@@ -2340,7 +2546,7 @@ async function saveSettingsContact() {
       });
     }
 
-    renderAgentList({ refreshIdentity: true });
+    renderConversationList({ refreshIdentity: true });
     updateHeader();
     renderMessages();
     loadSettingsDraft(target.key);
@@ -2358,14 +2564,615 @@ async function saveSettingsContact() {
 
 function updateLocalAgentProfile(agentId, patch) {
   state.agents = state.agents.map((agent) => (
-    agent.agentId === agentId
-      ? { ...agent, ...patch }
-      : agent
+    agent.agentId === agentId ? { ...agent, ...patch } : agent
+  ));
+  state.conversations = state.conversations.map((item) => (
+    item.kind === 'agent' && item.agentId === agentId ? { ...item, ...patch, title: patch.name || item.title } : item
   ));
 }
 
 function getActiveAgent() {
-  return state.agents.find((item) => item.agentId === state.activeAgentId) || null;
+  return state.activeConversationKind === 'agent'
+    ? findAgentById(state.activeConversationId)
+    : null;
+}
+
+function getActiveConversation() {
+  if (!state.activeConversationKind || !state.activeConversationId) return null;
+  const item = findConversationItem(state.activeConversationKind, state.activeConversationId);
+  if (item) return item;
+
+  if (state.activeConversationKind === 'group' && state.activeGroupDetail?.groupId === state.activeConversationId) {
+    return {
+      kind: 'group',
+      id: state.activeGroupDetail.groupId,
+      groupId: state.activeGroupDetail.groupId,
+      name: state.activeGroupDetail.name,
+      title: state.activeGroupDetail.name,
+      sessionKey: state.activeGroupDetail.sessionKey,
+      memberCount: state.activeGroupDetail.memberCount,
+      status: state.activeGroupDetail.status,
+      archived: state.activeGroupDetail.status !== 'active',
+      presence: 'idle',
+      summary: ''
+    };
+  }
+
+  return null;
+}
+
+function findConversationItem(kind, id) {
+  const activeItem = state.conversations.find((item) => item.kind === kind && item.id === id);
+  if (activeItem) return activeItem;
+  if (kind === 'group') {
+    return state.archivedGroups.find((item) => item.kind === 'group' && item.id === id) || null;
+  }
+  return null;
+}
+
+function findAgentById(agentId) {
+  return state.agents.find((item) => item.agentId === agentId) || null;
+}
+
+function toConversationKey(kind, id) {
+  return `${kind}:${id}`;
+}
+
+function getActiveHistorySearchScopeKey() {
+  return state.activeConversationKind && state.activeConversationId
+    ? toConversationKey(state.activeConversationKind, state.activeConversationId)
+    : '';
+}
+
+function buildHistorySearchUrl(query) {
+  if (state.activeConversationKind === 'group') {
+    return `/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}/history/search?q=${encodeURIComponent(query)}&limit=20`;
+  }
+  return `/api/openclaw-webchat/agents/${encodeURIComponent(state.activeConversationId)}/history/search?q=${encodeURIComponent(query)}&limit=20`;
+}
+
+function buildHistoryPageUrl(kind, id, before) {
+  const prefix = kind === 'group'
+    ? `/api/openclaw-webchat/groups/${encodeURIComponent(id)}/history`
+    : `/api/openclaw-webchat/agents/${encodeURIComponent(id)}/history`;
+  return `${prefix}?limit=30&before=${encodeURIComponent(before)}`;
+}
+
+function shouldShowConversationProcessing() {
+  if (isActiveSessionBusy()) return true;
+  const active = getActiveConversation();
+  return Boolean(active && active.presence === 'running');
+}
+
+async function syncCurrentConversation({ preserveScrollBottom = true, silent = false } = {}) {
+  if (!state.activeSessionKey || !state.activeConversationId || !state.activeConversationKind) return;
+  const context = {
+    kind: state.activeConversationKind,
+    id: state.activeConversationId,
+    sessionKey: state.activeSessionKey
+  };
+
+  const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(state.activeSessionKey)}/snapshot?limit=200`);
+  if (!isOperationContextActive(context)) return;
+
+  state.messages = Array.isArray(payload?.history?.messages) ? payload.history.messages : [];
+  state.nextBefore = payload?.history?.nextBefore || null;
+  state.hasMore = Boolean(payload?.history?.hasMore);
+  if (payload?.group && state.activeConversationKind === 'group') {
+    state.activeGroupDetail = payload.group;
+    state.activeConversationCanSend = payload.group.canSend !== false;
+  }
+  mergeConversationItem(payload?.item);
+  renderConversationList({ refreshIdentity: false });
+  renderMessages();
+  updateHeader();
+  if (preserveScrollBottom) {
+    maybeScrollMessagesToBottom();
+  } else {
+    maybeScrollMessagesToBottom(true);
+  }
+  if (!silent) {
+    showStatus('会话已同步。', 'success');
+  }
+}
+
+function mergeConversationItem(item) {
+  if (!item?.kind || !item?.id) return;
+  const replaceInList = (list) => list.map((entry) => (
+    entry.kind === item.kind && entry.id === item.id ? { ...entry, ...item } : entry
+  ));
+  if (state.conversations.some((entry) => entry.kind === item.kind && entry.id === item.id)) {
+    state.conversations = replaceInList(state.conversations);
+  }
+  if (item.kind === 'group' && state.archivedGroups.some((entry) => entry.kind === item.kind && entry.id === item.id)) {
+    state.archivedGroups = replaceInList(state.archivedGroups);
+  }
+}
+
+function renderSettingsGroupLists() {
+  if (!settingsActiveGroupListEl || !settingsArchivedGroupListEl) return;
+  settingsActiveGroupListEl.innerHTML = '';
+  settingsArchivedGroupListEl.innerHTML = '';
+
+  const activeGroups = state.conversations.filter((item) => item.kind === 'group');
+  const archivedGroups = state.archivedGroups;
+
+  if (!activeGroups.length) {
+    settingsActiveGroupListEl.append(createSettingsGroupEmpty('当前没有可管理的群聊。'));
+  } else {
+    activeGroups.forEach((group) => settingsActiveGroupListEl.append(createSettingsGroupRow(group, { archived: false })));
+  }
+
+  if (!archivedGroups.length) {
+    settingsArchivedGroupListEl.append(createSettingsGroupEmpty('还没有已退出或已解散的群聊。'));
+  } else {
+    archivedGroups.forEach((group) => settingsArchivedGroupListEl.append(createSettingsGroupRow(group, { archived: true })));
+  }
+}
+
+function createSettingsGroupEmpty(text) {
+  const empty = document.createElement('div');
+  empty.className = 'settings-group-empty';
+  empty.textContent = text;
+  return empty;
+}
+
+function createSettingsGroupRow(group, { archived }) {
+  const row = document.createElement('div');
+  row.className = 'settings-group-row';
+
+  const copy = document.createElement('div');
+  copy.className = 'settings-group-copy';
+
+  const title = document.createElement('div');
+  title.className = 'settings-group-name';
+  title.textContent = group.name || group.title || '群聊';
+
+  const meta = document.createElement('div');
+  meta.className = 'settings-group-meta';
+  meta.textContent = archived
+    ? `${group.memberCount || 0} 人 · ${group.status === 'dissolved' ? '已解散' : '已退出'}`
+    : `${group.memberCount || 0} 人 · ${group.summary || '暂无摘要'}`;
+
+  const actions = document.createElement('div');
+  actions.className = 'settings-group-actions';
+
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'ghost-button';
+  open.textContent = archived ? '查看历史' : '打开';
+  open.addEventListener('click', async () => {
+    toggleSettingsPanel(false);
+    await openConversation('group', group.groupId || group.id, { forceReload: true });
+  });
+
+  actions.append(open);
+  if (!archived) {
+    const manage = document.createElement('button');
+    manage.type = 'button';
+    manage.className = 'ghost-button';
+    manage.textContent = '管理';
+    manage.addEventListener('click', async () => {
+      await openConversation('group', group.groupId || group.id, { forceReload: false });
+      openManageCurrentGroup();
+    });
+    actions.append(manage);
+  }
+
+  copy.append(title, meta);
+  row.append(copy, actions);
+  return row;
+}
+
+function openCreateGroupModal() {
+  state.groupModalMode = 'create';
+  state.groupModalGroupId = null;
+  state.groupModalName = '';
+  state.groupModalSelectedAgentIds = new Set();
+  renderGroupModal();
+  toggleGroupModal(true);
+}
+
+async function openManageCurrentGroup() {
+  if (state.activeConversationKind !== 'group' || !state.activeConversationId) return;
+  const payload = await apiGet(`/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}`);
+  state.activeGroupDetail = payload?.group || state.activeGroupDetail;
+  state.groupModalMode = 'manage';
+  state.groupModalGroupId = state.activeConversationId;
+  state.groupModalName = state.activeGroupDetail?.name || '';
+  state.groupModalSelectedAgentIds = new Set();
+  renderGroupModal();
+  toggleGroupModal(true);
+}
+
+function toggleGroupModal(open) {
+  state.groupModalOpen = Boolean(open);
+  groupModalEl?.classList.toggle('hidden', !state.groupModalOpen);
+  groupModalBackdropEl?.classList.toggle('hidden', !state.groupModalOpen);
+  groupModalEl?.setAttribute('aria-hidden', state.groupModalOpen ? 'false' : 'true');
+  if (!state.groupModalOpen) {
+    state.groupModalSelectedAgentIds = new Set();
+  }
+}
+
+function renderGroupModal() {
+  if (!groupModalEl) return;
+  const detail = state.groupModalMode === 'manage' ? state.activeGroupDetail : null;
+  const canManage = state.groupModalMode === 'manage' && detail;
+
+  groupModalTitleEl.textContent = canManage ? `管理群聊 · ${detail.name}` : '新建群聊';
+  groupNameInputEl.value = state.groupModalName;
+  groupCurrentMembersFieldEl.classList.toggle('hidden', !canManage);
+  createGroupSubmitButtonEl.classList.toggle('hidden', canManage);
+  renameGroupButtonEl.classList.toggle('hidden', !canManage || detail?.status !== 'active');
+  inviteGroupMembersButtonEl.classList.toggle('hidden', !canManage || detail?.status !== 'active');
+  leaveGroupButtonEl.classList.toggle('hidden', !canManage || detail?.status !== 'active');
+  dissolveGroupButtonEl.classList.toggle('hidden', !canManage || detail?.status !== 'active');
+
+  renderGroupMemberPicker();
+  renderGroupCurrentMembers();
+}
+
+function renderGroupMemberPicker() {
+  if (!groupMemberPickerEl) return;
+  groupMemberPickerEl.innerHTML = '';
+  const currentMemberIds = new Set((state.activeGroupDetail?.currentMembers || []).map((item) => item.agentId));
+  const availableAgents = state.agents.filter((agent) => (
+    state.groupModalMode === 'create' || !currentMemberIds.has(agent.agentId)
+  ));
+
+  if (!availableAgents.length) {
+    const empty = document.createElement('div');
+    empty.className = 'settings-group-empty';
+    empty.textContent = state.groupModalMode === 'create' ? '当前没有可邀请的 agent。' : '所有 agent 都已在群里。';
+    groupMemberPickerEl.append(empty);
+    return;
+  }
+
+  availableAgents.forEach((agent) => {
+    const label = document.createElement('label');
+    label.className = 'group-member-option';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'group-member-checkbox';
+    input.checked = state.groupModalSelectedAgentIds.has(agent.agentId);
+    const syncSelectedState = () => {
+      if (input.checked) {
+        state.groupModalSelectedAgentIds.add(agent.agentId);
+      } else {
+        state.groupModalSelectedAgentIds.delete(agent.agentId);
+      }
+      label.classList.toggle('selected', input.checked);
+    };
+    input.addEventListener('change', syncSelectedState);
+
+    const main = document.createElement('div');
+    main.className = 'group-member-main';
+
+    const avatar = createAvatarElement({
+      className: 'group-member-avatar',
+      avatarUrl: agent.avatarUrl,
+      label: agent.name || agent.agentId,
+      fallbackText: (agent.name || agent.agentId || '?').slice(0, 1).toUpperCase()
+    });
+
+    const copy = document.createElement('div');
+    copy.className = 'group-member-copy';
+
+    const name = document.createElement('div');
+    name.className = 'group-member-name';
+    name.textContent = agent.name || agent.agentId;
+
+    const meta = document.createElement('div');
+    meta.className = 'group-member-id';
+    meta.textContent = agent.agentId;
+
+    copy.append(name, meta);
+    main.append(avatar, copy);
+    label.append(input, main);
+    label.classList.toggle('selected', input.checked);
+    label.addEventListener('click', (event) => {
+      if (event.target === input) return;
+      event.preventDefault();
+      input.checked = !input.checked;
+      syncSelectedState();
+    });
+    groupMemberPickerEl.append(label);
+  });
+}
+
+function renderGroupCurrentMembers() {
+  if (!groupCurrentMembersEl) return;
+  groupCurrentMembersEl.innerHTML = '';
+  const members = state.activeGroupDetail?.currentMembers || [];
+  if (!members.length) {
+    groupCurrentMembersEl.append(createSettingsGroupEmpty('当前群聊还没有成员。'));
+    return;
+  }
+
+  members.forEach((member) => {
+    const row = document.createElement('div');
+    row.className = 'group-current-member-row';
+
+    const main = document.createElement('div');
+    main.className = 'group-current-member-main';
+
+    const avatar = createAvatarElement({
+      className: 'group-member-avatar',
+      avatarUrl: member.avatarUrl,
+      label: member.name || member.agentId,
+      fallbackText: (member.name || member.agentId || '?').slice(0, 1).toUpperCase()
+    });
+
+    const copy = document.createElement('div');
+    copy.className = 'group-current-member-copy';
+    const name = document.createElement('div');
+    name.className = 'group-member-name';
+    name.textContent = member.name || member.agentId;
+
+    const meta = document.createElement('div');
+    meta.className = 'group-member-id';
+    meta.textContent = member.agentId;
+
+    copy.append(name, meta);
+    main.append(avatar, copy);
+
+    row.append(main);
+    if (state.activeGroupDetail?.status === 'active') {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'ghost-button';
+      remove.textContent = '移除';
+      remove.addEventListener('click', () => removeGroupMemberFromCurrent(member.agentId));
+      row.append(remove);
+    }
+    groupCurrentMembersEl.append(row);
+  });
+}
+
+async function submitCreateGroup() {
+  const name = groupNameInputEl.value.trim();
+  if (!name) {
+    showStatus('群名不能为空。', 'error');
+    return;
+  }
+  const memberAgentIds = [...state.groupModalSelectedAgentIds];
+  const payload = await apiPost('/api/openclaw-webchat/groups', { name, memberAgentIds });
+  toggleGroupModal(false);
+  await refreshConversations({ autoOpen: false });
+  await openConversation('group', payload?.group?.groupId || payload?.group?.id, { forceReload: true });
+}
+
+async function submitRenameGroup() {
+  if (!state.activeConversationId) return;
+  const name = groupNameInputEl.value.trim();
+  if (!name) {
+    showStatus('群名不能为空。', 'error');
+    return;
+  }
+  await apiPatch(`/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}`, { name });
+  state.groupModalName = name;
+  await refreshConversations({ autoOpen: false });
+  await openConversation('group', state.activeConversationId, { forceReload: true, preserveScrollBottom: true });
+  renderGroupModal();
+}
+
+async function submitInviteGroupMembers() {
+  if (!state.activeConversationId || !state.groupModalSelectedAgentIds.size) return;
+  await apiPost(`/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}/members`, {
+    agentIds: [...state.groupModalSelectedAgentIds]
+  });
+  state.groupModalSelectedAgentIds = new Set();
+  await refreshConversations({ autoOpen: false });
+  await openConversation('group', state.activeConversationId, { forceReload: true, preserveScrollBottom: true });
+  await openManageCurrentGroup();
+}
+
+async function removeGroupMemberFromCurrent(agentId) {
+  if (!state.activeConversationId) return;
+  await apiDelete(`/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}/members/${encodeURIComponent(agentId)}`);
+  await refreshConversations({ autoOpen: false });
+  await openConversation('group', state.activeConversationId, { forceReload: true, preserveScrollBottom: true });
+  await openManageCurrentGroup();
+}
+
+async function leaveCurrentGroup() {
+  if (!state.activeConversationId || !window.confirm('退出后该群会从左侧列表移除，确定继续吗？')) return;
+  await apiPost(`/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}/leave`, {});
+  toggleGroupModal(false);
+  await refreshConversations({ autoOpen: true });
+}
+
+async function dissolveCurrentGroup() {
+  if (!state.activeConversationId || !window.confirm('解散后群聊会从左侧消失，但历史仍可在设置里查看，确定继续吗？')) return;
+  await apiPost(`/api/openclaw-webchat/groups/${encodeURIComponent(state.activeConversationId)}/dissolve`, {});
+  toggleGroupModal(false);
+  await refreshConversations({ autoOpen: true });
+}
+
+function handleComposerInput() {
+  const nextValue = composerInputEl.value;
+  state.composerMentions = reconcileComposerMentions(state.composerPreviousValue, nextValue, state.composerMentions);
+  state.composerPreviousValue = nextValue;
+  autoResizeComposer();
+  updateMentionMenuFromSelection();
+}
+
+function handleComposerKeydown(event) {
+  if (!state.mentionMenuOpen) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    state.mentionSelectedIndex = Math.min(state.mentionCandidates.length - 1, state.mentionSelectedIndex + 1);
+    renderMentionMenu();
+    return;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    state.mentionSelectedIndex = Math.max(0, state.mentionSelectedIndex - 1);
+    renderMentionMenu();
+    return;
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault();
+    const target = state.mentionCandidates[state.mentionSelectedIndex];
+    if (target) applyMentionCandidate(target);
+    return;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeMentionMenu();
+  }
+}
+
+function updateMentionMenuFromSelection() {
+  if (getActiveConversation()?.kind !== 'group' || !state.activeConversationCanSend) {
+    closeMentionMenu();
+    return;
+  }
+
+  const cursor = composerInputEl.selectionStart || 0;
+  const before = composerInputEl.value.slice(0, cursor);
+  const match = before.match(/(?:^|\s)@([^\s@]*)$/u);
+  if (!match) {
+    closeMentionMenu();
+    return;
+  }
+
+  const query = match[1] || '';
+  const rangeEnd = cursor;
+  const rangeStart = rangeEnd - query.length - 1;
+  const candidates = getGroupMentionCandidates(query);
+  if (!candidates.length) {
+    closeMentionMenu();
+    return;
+  }
+
+  state.mentionQuery = query;
+  state.mentionCandidates = candidates;
+  state.mentionSelectedIndex = Math.min(state.mentionSelectedIndex, candidates.length - 1);
+  state.mentionRange = { start: rangeStart, end: rangeEnd };
+  state.mentionMenuOpen = true;
+  renderMentionMenu();
+}
+
+function getGroupMentionCandidates(query) {
+  const members = state.activeGroupDetail?.currentMembers || [];
+  const normalized = String(query || '').trim().toLowerCase();
+  return members.filter((member) => {
+    if (!normalized) return true;
+    return String(member.name || '').toLowerCase().includes(normalized)
+      || String(member.agentId || '').toLowerCase().includes(normalized);
+  });
+}
+
+function renderMentionMenu() {
+  if (!mentionMenuEl) return;
+  mentionMenuEl.innerHTML = '';
+  mentionMenuEl.classList.toggle('hidden', !state.mentionMenuOpen);
+  if (!state.mentionMenuOpen) return;
+
+  state.mentionCandidates.forEach((candidate, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `mention-menu-item${index === state.mentionSelectedIndex ? ' active' : ''}`;
+    button.textContent = `${candidate.name} · ${candidate.agentId}`;
+    button.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      applyMentionCandidate(candidate);
+    });
+    mentionMenuEl.append(button);
+  });
+}
+
+function applyMentionCandidate(candidate) {
+  if (!state.mentionRange) return;
+  const token = `@${candidate.name}`;
+  const value = composerInputEl.value;
+  const nextValue = `${value.slice(0, state.mentionRange.start)}${token} ${value.slice(state.mentionRange.end)}`;
+  composerInputEl.value = nextValue;
+  const mention = {
+    agentId: candidate.agentId,
+    displayName: candidate.name,
+    start: state.mentionRange.start,
+    end: state.mentionRange.start + token.length
+  };
+  state.composerMentions = reconcileComposerMentions(state.composerPreviousValue, nextValue, state.composerMentions);
+  state.composerMentions.push(mention);
+  state.composerPreviousValue = nextValue;
+  const caret = mention.end + 1;
+  composerInputEl.setSelectionRange(caret, caret);
+  closeMentionMenu();
+  autoResizeComposer();
+}
+
+function reconcileComposerMentions(previousValue, nextValue, mentions) {
+  const prev = String(previousValue || '');
+  const next = String(nextValue || '');
+  const currentMentions = Array.isArray(mentions) ? mentions : [];
+  if (!currentMentions.length) return [];
+  if (prev === next) {
+    return currentMentions.filter((mention) => next.slice(mention.start, mention.end) === `@${mention.displayName}`);
+  }
+
+  let prefix = 0;
+  while (prefix < prev.length && prefix < next.length && prev[prefix] === next[prefix]) prefix += 1;
+
+  let suffix = 0;
+  while (
+    suffix < prev.length - prefix
+    && suffix < next.length - prefix
+    && prev[prev.length - 1 - suffix] === next[next.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+
+  const delta = next.length - prev.length;
+  return currentMentions.flatMap((mention) => {
+    let start = mention.start;
+    let end = mention.end;
+    if (end <= prefix) {
+      // unchanged before the edit
+    } else if (start >= prev.length - suffix) {
+      start += delta;
+      end += delta;
+    } else {
+      return [];
+    }
+    return next.slice(start, end) === `@${mention.displayName}` ? [{ ...mention, start, end }] : [];
+  });
+}
+
+function closeMentionMenu() {
+  state.mentionMenuOpen = false;
+  state.mentionQuery = '';
+  state.mentionCandidates = [];
+  state.mentionSelectedIndex = 0;
+  state.mentionRange = null;
+  renderMentionMenu();
+}
+
+function collectMentionAgentIdsFromComposer(text) {
+  const explicit = state.composerMentions
+    .filter((mention) => String(text).slice(mention.start, mention.end) === `@${mention.displayName}`)
+    .map((mention) => mention.agentId);
+
+  const members = state.activeGroupDetail?.currentMembers || [];
+  const implicit = [];
+  const matcher = /@([^\s@]+)/gu;
+  let match;
+  while ((match = matcher.exec(String(text || '')))) {
+    const token = String(match[1] || '').trim().toLowerCase();
+    if (!token) continue;
+    const exactMatches = members.filter((member) => (
+      String(member.name || '').toLowerCase() === token || String(member.agentId || '').toLowerCase() === token
+    ));
+    if (exactMatches.length === 1) {
+      implicit.push(exactMatches[0].agentId);
+    }
+  }
+
+  return [...new Set([...explicit, ...implicit])];
 }
 
 function getSendingStatusMessage() {
@@ -2423,7 +3230,7 @@ function autoResizeComposer() {
 }
 
 function syncComposerInteractivity() {
-  setComposerEnabled(Boolean(state.activeSessionKey) && !isActiveSessionBusy());
+  setComposerEnabled(Boolean(state.activeSessionKey) && state.activeConversationCanSend !== false && !isActiveSessionBusy());
 }
 
 function setComposerEnabled(enabled) {
@@ -2432,6 +3239,13 @@ function setComposerEnabled(enabled) {
   newContextButtonEl.disabled = !enabled;
   attachButtonEl.disabled = !enabled;
   mediaUploadInputEl.disabled = !enabled;
+  if (!enabled && state.activeConversationCanSend === false) {
+    composerInputEl.placeholder = '当前群聊为只读历史，不能继续发送消息';
+  } else if (getActiveConversation()?.kind === 'group') {
+    composerInputEl.placeholder = '输入消息，Enter 换行；群聊里输入 @ 可点名成员';
+  } else {
+    composerInputEl.placeholder = '输入消息，Enter 换行；点 / 按钮或直接输入 slash 命令可执行本地命令';
+  }
   if (!enabled) closeCommandMenu();
   renderPendingUploads();
 }
@@ -2463,6 +3277,8 @@ function isActiveSessionBusy() {
 
 function isOperationContextActive(context) {
   if (!context) return false;
+  if (context.kind && state.activeConversationKind !== context.kind) return false;
+  if (context.id && state.activeConversationId !== context.id) return false;
   if (context.agentId && state.activeAgentId !== context.agentId) return false;
   if (context.sessionKey && state.activeSessionKey !== context.sessionKey) return false;
   return true;
@@ -2472,7 +3288,10 @@ function startPolling() {
   clearInterval(state.pollingTimer);
   state.pollingTimer = setInterval(async () => {
     try {
-      await refreshAgents({ autoOpen: false });
+      await refreshConversations({ autoOpen: false });
+      if (!isActiveSessionBusy()) {
+        await syncCurrentConversation({ preserveScrollBottom: true, silent: true });
+      }
     } catch {
       // silent background refresh
     }
@@ -2512,6 +3331,16 @@ async function apiPatch(url, body) {
       accept: 'application/json'
     },
     body: JSON.stringify(body || {})
+  });
+  return handleResponse(response);
+}
+
+async function apiDelete(url) {
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      accept: 'application/json'
+    }
   });
   return handleResponse(response);
 }

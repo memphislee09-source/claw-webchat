@@ -16,6 +16,8 @@ const PORT = Number(process.env.OPENCLAW_WEBCHAT_PORT || 3770);
 const OPENCLAW_BIN = process.env.OPENCLAW_BIN || 'openclaw';
 const DATA_DIR = path.resolve(process.env.OPENCLAW_WEBCHAT_DATA_DIR || path.resolve(__dirname, '../data'));
 const BINDINGS_FILE = path.join(DATA_DIR, 'session-bindings.json');
+const GROUPS_FILE = path.join(DATA_DIR, 'groups.json');
+const GROUP_MEMBER_BINDINGS_FILE = path.join(DATA_DIR, 'group-member-bindings.json');
 const PROFILES_FILE = path.join(DATA_DIR, 'agent-profiles.json');
 const USER_PROFILE_FILE = path.join(DATA_DIR, 'user-profile.json');
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
@@ -34,6 +36,7 @@ const WHISPER_BIN = process.env.OPENCLAW_WEBCHAT_WHISPER_BIN || 'whisper';
 const WHISPER_MODEL = process.env.OPENCLAW_WEBCHAT_WHISPER_MODEL || 'tiny';
 const WHISPER_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_WHISPER_TIMEOUT_MS || 45000);
 const lateReplyReconciliations = new Set();
+const groupDispatchQueues = new Map();
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -72,6 +75,8 @@ ensureDir(DATA_DIR);
 ensureDir(HISTORY_DIR);
 ensureDir(UPLOADS_DIR);
 ensureJsonFile(BINDINGS_FILE, '{}');
+ensureJsonFile(GROUPS_FILE, '{}');
+ensureJsonFile(GROUP_MEMBER_BINDINGS_FILE, '{}');
 ensureJsonFile(PROFILES_FILE, '{}');
 ensureJsonFile(USER_PROFILE_FILE, JSON.stringify({ displayName: '我', avatarUrl: null }, null, 2));
 const MEDIA_SECRET = resolveMediaSecret();
@@ -88,35 +93,38 @@ app.get('/api/openclaw-webchat/commands', (_req, res) => {
   });
 });
 
+app.get('/api/openclaw-webchat/conversations', async (_req, res) => {
+  try {
+    const [agentIds, groups] = await Promise.all([
+      listAgents(),
+      listAllGroups()
+    ]);
+    const agents = buildAgentIdentityList(agentIds);
+    const items = [
+      ...buildAgentConversationItems(agentIds),
+      ...groups
+        .filter((group) => group.status === 'active')
+        .map((group) => buildGroupConversationItem(group))
+    ].sort(compareConversationListItems);
+
+    const archivedGroups = groups
+      .filter((group) => group.status !== 'active')
+      .map((group) => buildGroupConversationItem(group));
+
+    res.json({
+      items,
+      agents,
+      archivedGroups
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
 app.get('/api/openclaw-webchat/agents', async (_req, res) => {
   try {
     const agents = await listAgents();
-    const bindings = readJson(BINDINGS_FILE);
-    const profiles = readJson(PROFILES_FILE);
-
-    const items = agents.map((agentId) => {
-      const binding = bindings[agentId] || null;
-      const profile = profiles[agentId] || {};
-      const latest = binding ? getLatestHistoryEntry(agentId) : null;
-      const summary = latest ? buildMessageSummary(latest) : '';
-      const lastAssistantAt = binding?.lastAssistantAt || (latest?.role === 'assistant' ? latest?.createdAt : null);
-      const isRunning = Boolean(binding?.replyState === 'running');
-      const isRecent = !isRunning && isTimestampRecent(lastAssistantAt, ACTIVE_RECENT_WINDOW_MS);
-
-      return {
-        agentId,
-        name: profile.displayName || agentId,
-        avatarUrl: presentAvatarUrl(profile.avatarUrl),
-        sessionKey: binding?.sessionKey || null,
-        hasSession: Boolean(binding),
-        summary,
-        lastMessageAt: latest?.createdAt || binding?.updatedAt || null,
-        presence: isRunning ? 'running' : isRecent ? 'recent' : 'idle'
-      };
-    });
-
-    items.sort(compareAgentListItems);
-    res.json({ agents: items });
+    res.json({ agents: buildAgentConversationItems(agents) });
   } catch (error) {
     res.status(500).json({ error: formatError(error) });
   }
@@ -175,17 +183,215 @@ app.get('/api/openclaw-webchat/agents/:agentId/history/search', (req, res) => {
   }
 });
 
+app.post('/api/openclaw-webchat/groups', async (req, res) => {
+  const name = normalizeOptionalString(req.body?.name);
+  const memberAgentIds = normalizeAgentIdList(req.body?.memberAgentIds);
+
+  if (!name) {
+    return res.status(400).json({ error: 'Group name is required.' });
+  }
+
+  try {
+    const group = createGroup({ name, memberAgentIds });
+    await broadcastGroupSystemNote(group.groupId, `你已加入群聊「${group.name}」。`);
+    const opened = buildGroupOpenPayload(group.groupId);
+    res.json({
+      ok: true,
+      group: buildGroupDetail(group),
+      ...opened
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.get('/api/openclaw-webchat/groups/:groupId', (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+
+  res.json({ group: buildGroupDetail(group) });
+});
+
+app.post('/api/openclaw-webchat/groups/:groupId/open', (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+
+  try {
+    res.json(buildGroupOpenPayload(group.groupId));
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.patch('/api/openclaw-webchat/groups/:groupId', async (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+  const name = normalizeOptionalString(req.body?.name);
+  if (!name) return res.status(400).json({ error: 'Group name is required.' });
+
+  try {
+    const updated = patchGroup(group.groupId, {
+      name,
+      updatedAt: new Date().toISOString()
+    });
+    invalidateGroupMemberBootstraps(updated.groupId);
+    appendGroupSystemMessage(updated.groupId, `群名已修改为「${updated.name}」`, 'group-rename');
+    await broadcastGroupSystemNote(updated.groupId, `群名已修改为「${updated.name}」。`);
+    res.json({ ok: true, group: buildGroupDetail(updated) });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.post('/api/openclaw-webchat/groups/:groupId/members', async (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+  const agentIds = normalizeAgentIdList(req.body?.agentIds);
+  if (!agentIds.length) return res.status(400).json({ error: 'At least one agent is required.' });
+
+  try {
+    const added = addGroupMembers(group.groupId, agentIds);
+    if (!added.length) {
+      return res.json({ ok: true, group: buildGroupDetail(getGroup(group.groupId)), added: [] });
+    }
+    const labels = added.map((agentId) => presentAgentIdentity(agentId).name).join('、');
+    appendGroupSystemMessage(group.groupId, `已邀请 ${labels} 加入群聊`, 'group-member-added');
+    for (const agentId of added) {
+      ensureGroupMemberBinding(group.groupId, agentId);
+      await broadcastGroupSystemNote(group.groupId, `${presentAgentIdentity(agentId).name} 已加入群聊。`, {
+        targetAgentIds: [agentId]
+      });
+    }
+    await broadcastGroupSystemNote(group.groupId, `${labels} 已加入群聊。`, {
+      excludeAgentIds: added
+    });
+    res.json({
+      ok: true,
+      added,
+      group: buildGroupDetail(getGroup(group.groupId))
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.delete('/api/openclaw-webchat/groups/:groupId/members/:agentId', async (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+
+  try {
+    const removed = removeGroupMember(group.groupId, req.params.agentId);
+    if (!removed) {
+      return res.status(404).json({ error: 'Group member not found.' });
+    }
+    const label = presentAgentIdentity(req.params.agentId).name;
+    appendGroupSystemMessage(group.groupId, `已将 ${label} 移出群聊`, 'group-member-removed');
+    await broadcastGroupSystemNote(group.groupId, `${label} 已被移出群聊。`);
+    res.json({ ok: true, group: buildGroupDetail(getGroup(group.groupId)) });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.post('/api/openclaw-webchat/groups/:groupId/leave', (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+
+  try {
+    const updated = patchGroup(group.groupId, {
+      status: 'left',
+      updatedAt: new Date().toISOString()
+    });
+    appendGroupSystemMessage(group.groupId, '你已退出群聊', 'group-left');
+    clearGroupDispatchQueues(group.groupId);
+    res.json({ ok: true, group: buildGroupDetail(updated) });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.post('/api/openclaw-webchat/groups/:groupId/dissolve', async (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+
+  try {
+    const updated = patchGroup(group.groupId, {
+      status: 'dissolved',
+      updatedAt: new Date().toISOString()
+    });
+    appendGroupSystemMessage(group.groupId, '群聊已解散', 'group-dissolved');
+    await broadcastGroupSystemNote(group.groupId, '群聊已解散。');
+    clearGroupDispatchQueues(group.groupId);
+    res.json({ ok: true, group: buildGroupDetail(updated) });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.get('/api/openclaw-webchat/groups/:groupId/history', (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+  const limit = clampInt(req.query.limit, 30, 1, HISTORY_PAGE_LIMIT_MAX);
+  const before = typeof req.query.before === 'string' ? req.query.before : null;
+
+  try {
+    res.json(getGroupHistoryPage({ groupId: group.groupId, limit, before }));
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.get('/api/openclaw-webchat/groups/:groupId/history/search', (req, res) => {
+  const group = getGroup(req.params.groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found.' });
+  const query = normalizeOptionalString(req.query.q);
+  const limit = clampInt(req.query.limit, 20, 1, 50);
+  if (!query) return res.status(400).json({ error: 'Search query is required.' });
+
+  try {
+    res.json(searchGroupHistory({ groupId: group.groupId, query, limit }));
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.get('/api/openclaw-webchat/sessions/:sessionKey/snapshot', (req, res) => {
+  const sessionKey = String(req.params.sessionKey || '');
+  const session = getSessionResourceBySessionKey(sessionKey);
+  if (!session) return res.status(404).json({ error: 'Session not found.' });
+  const limit = clampInt(req.query.limit, 200, 1, HISTORY_PAGE_LIMIT_MAX);
+
+  try {
+    const history = session.kind === 'group'
+      ? getGroupHistoryPage({ groupId: session.group.groupId, limit, before: null })
+      : getHistoryPage({ agentId: session.binding.agentId, limit, before: null });
+    res.json({
+      kind: session.kind,
+      item: session.kind === 'group'
+        ? buildGroupConversationItem(session.group)
+        : buildAgentConversationItem(session.binding.agentId),
+      group: session.kind === 'group' ? buildGroupDetail(session.group) : null,
+      history
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
 app.post('/api/openclaw-webchat/sessions/:sessionKey/send', async (req, res) => {
   const { sessionKey } = req.params;
   const text = String(req.body?.text || '').trim();
   const inputBlocks = normalizeInputBlocks(req.body?.blocks);
-  const sessionBinding = getBindingBySessionKey(sessionKey);
+  const mentionAgentIds = normalizeAgentIdList(req.body?.mentionAgentIds);
+  const session = getSessionResourceBySessionKey(sessionKey);
 
-  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+  if (!session) return res.status(404).json({ error: 'Session not found.' });
   if (!text && !inputBlocks.length) return res.status(400).json({ error: 'Message is empty.' });
 
   try {
-    const result = await runUserTurn(sessionBinding, { text, inputBlocks });
+    const result = session.kind === 'group'
+      ? await runGroupUserTurn(session.group, { text, inputBlocks, mentionAgentIds })
+      : await runUserTurn(session.binding, { text, inputBlocks });
     res.json({ ok: true, message: result.message });
   } catch (error) {
     res.status(500).json({ ok: false, error: formatError(error) });
@@ -195,13 +401,15 @@ app.post('/api/openclaw-webchat/sessions/:sessionKey/send', async (req, res) => 
 app.post('/api/openclaw-webchat/sessions/:sessionKey/command', async (req, res) => {
   const { sessionKey } = req.params;
   const command = String(req.body?.command || '').trim();
-  const sessionBinding = getBindingBySessionKey(sessionKey);
+  const session = getSessionResourceBySessionKey(sessionKey);
 
-  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+  if (!session) return res.status(404).json({ error: 'Session not found.' });
   if (!command.startsWith('/')) return res.status(400).json({ error: 'Invalid slash command.' });
 
   try {
-    const result = await runSlashCommand(sessionBinding, command);
+    const result = session.kind === 'group'
+      ? await runGroupSlashCommand(session.group, command)
+      : await runSlashCommand(session.binding, command);
     res.json({ ok: true, ...result });
   } catch (error) {
     res.status(500).json({ error: formatError(error) });
@@ -504,6 +712,30 @@ async function runSlashCommand(binding, command) {
   throw new Error(`Unsupported slash command: ${command}`);
 }
 
+async function runGroupSlashCommand(group, command) {
+  const parsed = parseSlashCommand(command);
+  if (!parsed) {
+    throw new Error(`Invalid slash command: ${command}`);
+  }
+
+  const { name } = parsed;
+  if (name === '/new' || name === '/reset') {
+    return runGroupContextResetSlashCommand(group, command);
+  }
+
+  if (name === '/help') {
+    return {
+      command,
+      message: appendGroupSystemMessage(group.groupId, buildSlashHelpText(), 'group-help')
+    };
+  }
+
+  return {
+    command,
+    message: appendGroupSystemMessage(group.groupId, '当前群聊只支持 /new、/reset、/help。', 'group-command-info')
+  };
+}
+
 async function runContextResetSlashCommand(binding, command) {
   const previousUpstreamSessionKey = binding.upstreamSessionKey;
   await gatewayCall('sessions.reset', { key: previousUpstreamSessionKey });
@@ -537,6 +769,77 @@ async function runContextResetSlashCommand(binding, command) {
   return {
     command,
     message: presentHistoryEntry(marker)
+  };
+}
+
+async function runGroupContextResetSlashCommand(group, command) {
+  const members = getCurrentGroupMembers(group.groupId);
+
+  for (const member of members) {
+    const binding = ensureGroupMemberBinding(group.groupId, member.agentId);
+    const nextGeneration = createUpstreamGeneration();
+    await gatewayCall('sessions.reset', { key: binding.upstreamSessionKey });
+    patchGroupMemberBinding(group.groupId, member.agentId, {
+      upstreamGeneration: nextGeneration,
+      upstreamSessionKey: buildGroupMemberUpstreamSessionKey(group.groupId, member.agentId, nextGeneration),
+      bootstrapVersion: null,
+      replyState: 'idle',
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  for (const member of members) {
+    await ensureGroupBootstrapInjected(group.groupId, member.agentId);
+  }
+
+  return {
+    command,
+    message: appendGroupSystemMessage(group.groupId, '已重置上下文', 'context-reset')
+  };
+}
+
+async function runGroupUserTurn(group, { text, inputBlocks, mentionAgentIds }) {
+  if (group.status !== 'active') {
+    throw new Error('This group is read-only.');
+  }
+
+  const currentMembers = getCurrentGroupMembers(group.groupId);
+  const validMentions = normalizeGroupMentionAgentIds(group.groupId, mentionAgentIds);
+  const userBlocks = [];
+  if (text) userBlocks.push({ type: 'text', text });
+  userBlocks.push(...inputBlocks);
+
+  const userMessage = normalizeHistoryRow({
+    id: cryptoId(),
+    conversationType: 'group',
+    conversationId: group.groupId,
+    sessionKey: group.sessionKey,
+    role: 'user',
+    createdAt: new Date().toISOString(),
+    mentionAgentIds: validMentions,
+    blocks: userBlocks
+  });
+
+  appendGroupHistory(group.groupId, userMessage);
+  patchGroup(group.groupId, { updatedAt: new Date().toISOString() });
+
+  for (const member of currentMembers) {
+    ensureGroupMemberBinding(group.groupId, member.agentId);
+    patchGroupMemberBinding(group.groupId, member.agentId, {
+      replyState: 'running',
+      updatedAt: new Date().toISOString()
+    });
+    enqueueGroupDispatchTask(group.groupId, member.agentId, {
+      type: 'user-turn',
+      createdAt: userMessage.createdAt,
+      userMessageId: userMessage.id,
+      mentionAgentIds: validMentions,
+      blocks: userBlocks
+    });
+  }
+
+  return {
+    message: presentHistoryEntry(userMessage)
   };
 }
 
@@ -1272,6 +1575,8 @@ function searchHistory({ agentId, query, limit }) {
     results.push({
       id: row.id,
       role: row.role,
+      speakerId: row.speakerId || null,
+      speakerName: resolveHistorySpeakerName(row),
       createdAt: row.createdAt,
       excerpt: extractSearchExcerpt(searchableText, normalizedQuery),
       summary: buildMessageSummary(row)
@@ -1316,6 +1621,8 @@ function normalizeHistoryRow(row) {
   if (role === 'marker') {
     return {
       id: String(row.id || cryptoId()),
+      conversationType: String(row.conversationType || (row.groupId ? 'group' : 'agent')),
+      conversationId: String(row.conversationId || row.groupId || row.agentId || ''),
       agentId: String(row.agentId || ''),
       sessionKey: String(row.sessionKey || ''),
       role: 'marker',
@@ -1327,10 +1634,17 @@ function normalizeHistoryRow(row) {
 
   return {
     id: String(row?.id || cryptoId()),
+    conversationType: String(row?.conversationType || (row?.speakerId ? 'group' : 'agent')),
+    conversationId: String(row?.conversationId || row?.groupId || row?.agentId || ''),
     agentId: String(row?.agentId || ''),
+    speakerId: normalizeOptionalString(row?.speakerId) || undefined,
     sessionKey: String(row?.sessionKey || ''),
     role: role === 'assistant' ? 'assistant' : 'user',
     createdAt: toIsoString(row?.createdAt),
+    late: row?.late === true,
+    replyToMessageId: normalizeOptionalString(row?.replyToMessageId) || undefined,
+    replyToPreview: normalizeOptionalString(row?.replyToPreview) || undefined,
+    mentionAgentIds: normalizeAgentIdList(row?.mentionAgentIds),
     blocks: dedupeBlocks(Array.isArray(row?.blocks) ? row.blocks : [])
   };
 }
@@ -1342,7 +1656,9 @@ function presentHistoryEntry(row) {
       role: 'marker',
       createdAt: row.createdAt,
       markerType: row.markerType,
-      label: row.label
+      label: row.label,
+      conversationType: row.conversationType,
+      conversationId: row.conversationId
     };
   }
 
@@ -1350,6 +1666,14 @@ function presentHistoryEntry(row) {
     id: row.id,
     role: row.role,
     createdAt: row.createdAt,
+    conversationType: row.conversationType,
+    conversationId: row.conversationId,
+    speakerId: row.speakerId || null,
+    speakerName: resolveHistorySpeakerName(row),
+    late: row.late === true,
+    replyToMessageId: row.replyToMessageId || null,
+    replyToPreview: row.replyToPreview || null,
+    mentionAgentIds: row.mentionAgentIds || [],
     blocks: row.blocks.map(presentBlock)
   };
 }
@@ -1361,6 +1685,9 @@ function buildHistorySearchText(row) {
   }
 
   const fragments = [];
+  if (row.replyToPreview) {
+    fragments.push(String(row.replyToPreview));
+  }
   for (const block of Array.isArray(row.blocks) ? row.blocks : []) {
     if (block?.type === 'text' && block.text) {
       fragments.push(String(block.text));
@@ -1530,6 +1857,732 @@ async function listAgents() {
   }
 
   return [...ids].filter(Boolean);
+}
+
+async function listAllGroups() {
+  const groups = readJson(GROUPS_FILE);
+  return Object.values(groups || {}).map(normalizeGroupRecord);
+}
+
+function normalizeGroupRecord(group) {
+  const normalizedMembers = Array.isArray(group?.members)
+    ? group.members
+      .filter((item) => normalizeOptionalString(item?.agentId))
+      .map((item) => ({
+        agentId: String(item.agentId),
+        joinedAt: toIsoString(item.joinedAt),
+        removedAt: item.removedAt ? toIsoString(item.removedAt) : null
+      }))
+    : [];
+  return {
+    groupId: String(group?.groupId || cryptoId()),
+    name: String(group?.name || '群聊'),
+    sessionKey: String(group?.sessionKey || buildGroupSessionKey(group?.groupId || cryptoId())),
+    status: normalizeGroupStatus(group?.status),
+    createdAt: toIsoString(group?.createdAt),
+    updatedAt: toIsoString(group?.updatedAt),
+    members: normalizedMembers
+  };
+}
+
+function normalizeGroupStatus(value) {
+  const status = String(value || '').toLowerCase();
+  if (status === 'dissolved' || status === 'left') return status;
+  return 'active';
+}
+
+function normalizeAgentIdList(value) {
+  const out = [];
+  const seen = new Set();
+  const values = Array.isArray(value) ? value : [];
+  for (const item of values) {
+    const normalized = normalizeOptionalString(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function buildGroupSessionKey(groupId) {
+  return `${NAMESPACE}:group:${sanitizeSessionKeyPart(groupId)}`;
+}
+
+function buildGroupMemberBindingKey(groupId, agentId) {
+  return `${String(groupId)}::${String(agentId)}`;
+}
+
+function buildGroupMemberUpstreamSessionKey(groupId, agentId, generation = 'main') {
+  return `group:${sanitizeSessionKeyPart(groupId)}:agent:${sanitizeSessionKeyPart(agentId)}:${NAMESPACE}:${sanitizeSessionKeyPart(generation)}`;
+}
+
+function getGroup(groupId) {
+  const groups = readJson(GROUPS_FILE);
+  const raw = groups?.[groupId];
+  return raw ? normalizeGroupRecord(raw) : null;
+}
+
+function patchGroup(groupId, patch) {
+  const groups = readJson(GROUPS_FILE);
+  const current = groups?.[groupId];
+  if (!current) throw new Error(`Group not found: ${groupId}`);
+  groups[groupId] = {
+    ...normalizeGroupRecord(current),
+    ...patch,
+    groupId,
+    sessionKey: current.sessionKey || buildGroupSessionKey(groupId)
+  };
+  writeJson(GROUPS_FILE, groups);
+  return normalizeGroupRecord(groups[groupId]);
+}
+
+function createGroup({ name, memberAgentIds }) {
+  const groupId = `group-${Date.now()}-${cryptoId()}`;
+  const now = new Date().toISOString();
+  const groups = readJson(GROUPS_FILE);
+  groups[groupId] = {
+    groupId,
+    name,
+    sessionKey: buildGroupSessionKey(groupId),
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+    members: normalizeAgentIdList(memberAgentIds).map((agentId) => ({
+      agentId,
+      joinedAt: now,
+      removedAt: null
+    }))
+  };
+  writeJson(GROUPS_FILE, groups);
+
+  const created = normalizeGroupRecord(groups[groupId]);
+  appendGroupSystemMessage(created.groupId, `已创建群聊「${created.name}」`, 'group-created');
+
+  for (const agentId of memberAgentIds) {
+    ensureGroupMemberBinding(created.groupId, agentId);
+  }
+
+  return created;
+}
+
+function getCurrentGroupMembers(groupId) {
+  const group = getGroup(groupId);
+  if (!group) return [];
+  return group.members.filter((item) => !item.removedAt);
+}
+
+function addGroupMembers(groupId, agentIds) {
+  const group = getGroup(groupId);
+  if (!group) throw new Error('Group not found.');
+  if (group.status !== 'active') throw new Error('This group is read-only.');
+
+  const existing = new Set(getCurrentGroupMembers(groupId).map((item) => item.agentId));
+  const added = [];
+  const groups = readJson(GROUPS_FILE);
+  const target = normalizeGroupRecord(groups[groupId]);
+  const now = new Date().toISOString();
+
+  for (const agentId of normalizeAgentIdList(agentIds)) {
+    if (existing.has(agentId)) continue;
+    target.members.push({ agentId, joinedAt: now, removedAt: null });
+    added.push(agentId);
+  }
+
+  target.updatedAt = now;
+  groups[groupId] = target;
+  writeJson(GROUPS_FILE, groups);
+  return added;
+}
+
+function removeGroupMember(groupId, agentId) {
+  const group = getGroup(groupId);
+  if (!group) throw new Error('Group not found.');
+  if (group.status !== 'active') throw new Error('This group is read-only.');
+
+  const groups = readJson(GROUPS_FILE);
+  const target = normalizeGroupRecord(groups[groupId]);
+  const member = target.members.find((item) => item.agentId === agentId && !item.removedAt);
+  if (!member) return false;
+  member.removedAt = new Date().toISOString();
+  target.updatedAt = new Date().toISOString();
+  groups[groupId] = target;
+  writeJson(GROUPS_FILE, groups);
+  clearGroupDispatchQueueForAgent(groupId, agentId);
+  return true;
+}
+
+function getGroupMemberBindings() {
+  return readJson(GROUP_MEMBER_BINDINGS_FILE);
+}
+
+function ensureGroupMemberBinding(groupId, agentId) {
+  const bindings = getGroupMemberBindings();
+  const key = buildGroupMemberBindingKey(groupId, agentId);
+  if (bindings[key]) return bindings[key];
+
+  const now = new Date().toISOString();
+  const upstreamGeneration = 'main';
+  bindings[key] = {
+    groupId,
+    agentId,
+    namespace: NAMESPACE,
+    upstreamGeneration,
+    upstreamSessionKey: buildGroupMemberUpstreamSessionKey(groupId, agentId, upstreamGeneration),
+    bootstrapVersion: null,
+    replyState: 'idle',
+    createdAt: now,
+    updatedAt: now
+  };
+  writeJson(GROUP_MEMBER_BINDINGS_FILE, bindings);
+  return bindings[key];
+}
+
+function getGroupMemberBinding(groupId, agentId) {
+  const bindings = getGroupMemberBindings();
+  return bindings[buildGroupMemberBindingKey(groupId, agentId)] || null;
+}
+
+function patchGroupMemberBinding(groupId, agentId, patch) {
+  const bindings = getGroupMemberBindings();
+  const key = buildGroupMemberBindingKey(groupId, agentId);
+  if (!bindings[key]) throw new Error(`Group member binding not found: ${groupId}/${agentId}`);
+  bindings[key] = {
+    ...bindings[key],
+    ...patch,
+    groupId,
+    agentId
+  };
+  writeJson(GROUP_MEMBER_BINDINGS_FILE, bindings);
+  return bindings[key];
+}
+
+function invalidateGroupMemberBootstraps(groupId) {
+  const bindings = getGroupMemberBindings();
+  let changed = false;
+  for (const [key, binding] of Object.entries(bindings)) {
+    if (binding?.groupId !== groupId) continue;
+    bindings[key] = {
+      ...binding,
+      bootstrapVersion: null,
+      updatedAt: new Date().toISOString()
+    };
+    changed = true;
+  }
+  if (changed) writeJson(GROUP_MEMBER_BINDINGS_FILE, bindings);
+}
+
+function getSessionResourceBySessionKey(sessionKey) {
+  const binding = getBindingBySessionKey(sessionKey);
+  if (binding) return { kind: 'agent', binding };
+
+  const groups = readJson(GROUPS_FILE);
+  for (const group of Object.values(groups || {})) {
+    const normalized = normalizeGroupRecord(group);
+    if (normalized.sessionKey === sessionKey) {
+      return { kind: 'group', group: normalized };
+    }
+  }
+
+  return null;
+}
+
+function buildAgentIdentityList(agentIds) {
+  return [...agentIds]
+    .filter(Boolean)
+    .sort((left, right) => String(left).localeCompare(String(right)))
+    .map((agentId) => presentAgentIdentity(agentId));
+}
+
+function presentAgentIdentity(agentId) {
+  const profiles = readJson(PROFILES_FILE);
+  const profile = profiles[agentId] || {};
+  return {
+    agentId,
+    name: profile.displayName || agentId,
+    avatarUrl: presentAvatarUrl(profile.avatarUrl)
+  };
+}
+
+function buildAgentConversationItems(agentIds) {
+  return [...agentIds].map((agentId) => buildAgentConversationItem(agentId)).sort(compareAgentListItems);
+}
+
+function buildAgentConversationItem(agentId) {
+  const binding = getBinding(agentId);
+  const identity = presentAgentIdentity(agentId);
+  const latest = binding ? getLatestHistoryEntry(agentId) : null;
+  const summary = latest ? buildMessageSummary(latest) : '';
+  const lastAssistantAt = binding?.lastAssistantAt || (latest?.role === 'assistant' ? latest?.createdAt : null);
+  const isRunning = Boolean(binding?.replyState === 'running');
+  const isRecent = !isRunning && isTimestampRecent(lastAssistantAt, ACTIVE_RECENT_WINDOW_MS);
+  return {
+    kind: 'agent',
+    id: agentId,
+    agentId,
+    name: identity.name,
+    title: identity.name,
+    avatarUrl: identity.avatarUrl,
+    sessionKey: binding?.sessionKey || null,
+    hasSession: Boolean(binding),
+    summary,
+    lastMessageAt: latest?.createdAt || binding?.updatedAt || null,
+    presence: isRunning ? 'running' : isRecent ? 'recent' : 'idle'
+  };
+}
+
+function buildGroupConversationItem(group) {
+  const normalized = normalizeGroupRecord(group);
+  const latest = getLatestGroupHistoryEntry(normalized.groupId);
+  const currentMembers = getCurrentGroupMembers(normalized.groupId);
+  const bindings = currentMembers.map((member) => getGroupMemberBinding(normalized.groupId, member.agentId)).filter(Boolean);
+  const isRunning = bindings.some((binding) => binding?.replyState === 'running');
+  const lastAssistantAt = latest?.role === 'assistant'
+    ? latest.createdAt
+    : bindings
+      .map((binding) => binding?.lastAssistantAt)
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0] || null;
+  const isRecent = !isRunning && isTimestampRecent(lastAssistantAt, ACTIVE_RECENT_WINDOW_MS);
+  return {
+    kind: 'group',
+    id: normalized.groupId,
+    groupId: normalized.groupId,
+    name: normalized.name,
+    title: normalized.name,
+    summary: latest ? buildMessageSummary(latest) : '',
+    sessionKey: normalized.sessionKey,
+    hasSession: true,
+    lastMessageAt: latest?.createdAt || normalized.updatedAt || normalized.createdAt,
+    presence: normalized.status !== 'active'
+      ? 'idle'
+      : isRunning ? 'running' : isRecent ? 'recent' : 'idle',
+    memberCount: currentMembers.length,
+    status: normalized.status,
+    archived: normalized.status !== 'active'
+  };
+}
+
+function compareConversationListItems(a, b) {
+  return compareAgentListItems(a, b);
+}
+
+function buildGroupDetail(group) {
+  const normalized = normalizeGroupRecord(group);
+  const members = normalized.members.map((member) => ({
+    ...member,
+    ...presentAgentIdentity(member.agentId),
+    replyState: getGroupMemberBinding(normalized.groupId, member.agentId)?.replyState || 'idle',
+    presence: getGroupMemberBinding(normalized.groupId, member.agentId)?.replyState === 'running' ? 'running' : 'idle'
+  }));
+  return {
+    groupId: normalized.groupId,
+    name: normalized.name,
+    sessionKey: normalized.sessionKey,
+    status: normalized.status,
+    memberCount: members.filter((item) => !item.removedAt).length,
+    currentMembers: members.filter((item) => !item.removedAt),
+    pastMembers: members.filter((item) => item.removedAt),
+    canSend: normalized.status === 'active',
+    createdAt: normalized.createdAt,
+    updatedAt: normalized.updatedAt
+  };
+}
+
+function buildGroupOpenPayload(groupId) {
+  const group = getGroup(groupId);
+  if (!group) throw new Error('Group not found.');
+  const { messages, nextBefore, hasMore } = getGroupHistoryPage({ groupId, limit: HISTORY_OPEN_PAGE_LIMIT, before: null });
+  return {
+    kind: 'group',
+    group: buildGroupDetail(group),
+    sessionKey: group.sessionKey,
+    history: { messages, nextBefore, hasMore }
+  };
+}
+
+function normalizeGroupMentionAgentIds(groupId, mentionAgentIds) {
+  const memberSet = new Set(getCurrentGroupMembers(groupId).map((item) => item.agentId));
+  return normalizeAgentIdList(mentionAgentIds).filter((agentId) => memberSet.has(agentId));
+}
+
+function appendGroupHistory(groupId, message) {
+  const group = getGroup(groupId);
+  if (!group) throw new Error('Group not found.');
+  const row = normalizeHistoryRow({
+    conversationType: 'group',
+    conversationId: groupId,
+    sessionKey: group.sessionKey,
+    ...message
+  });
+  fs.appendFileSync(groupHistoryFile(groupId), `${JSON.stringify(row)}\n`, 'utf8');
+}
+
+function appendGroupSystemMessage(groupId, label, markerType = 'group-system') {
+  const group = getGroup(groupId);
+  if (!group) throw new Error('Group not found.');
+  const marker = normalizeHistoryRow({
+    id: cryptoId(),
+    conversationType: 'group',
+    conversationId: groupId,
+    sessionKey: group.sessionKey,
+    role: 'marker',
+    createdAt: new Date().toISOString(),
+    markerType,
+    label
+  });
+  appendGroupHistory(groupId, marker);
+  patchGroup(groupId, { updatedAt: marker.createdAt });
+  return presentHistoryEntry(marker);
+}
+
+function loadGroupHistory(groupId) {
+  const filePath = groupHistoryFile(groupId);
+  if (!fs.existsSync(filePath)) return [];
+  const rows = [];
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+  for (let index = 0; index < lines.length; index += 1) {
+    try {
+      const parsed = JSON.parse(lines[index]);
+      const normalized = normalizeHistoryRow(parsed);
+      normalized._seq = index;
+      rows.push(normalized);
+    } catch {
+      // ignore malformed line
+    }
+  }
+  return rows;
+}
+
+function getLatestGroupHistoryEntry(groupId) {
+  const rows = loadGroupHistory(groupId);
+  if (!rows.length) return null;
+  rows.sort(compareHistoryAsc);
+  return rows[rows.length - 1] || null;
+}
+
+function getGroupHistoryPage({ groupId, limit, before }) {
+  const rows = loadGroupHistory(groupId).sort(compareHistoryAsc);
+  const cursor = before ? decodeCursor(before) : null;
+  const filtered = cursor ? rows.filter((row) => compareHistoryKey(row, cursor) < 0) : rows;
+  const start = Math.max(0, filtered.length - limit);
+  const page = filtered.slice(start);
+  const hasMore = start > 0;
+  const nextBefore = hasMore && page[0] ? encodeCursor(page[0]) : null;
+  return {
+    messages: page.map(presentHistoryEntry),
+    hasMore,
+    nextBefore
+  };
+}
+
+function searchGroupHistory({ groupId, query, limit }) {
+  const normalizedQuery = String(query || '').trim();
+  const rows = loadGroupHistory(groupId).sort(compareHistoryAsc).reverse();
+  const results = [];
+  let total = 0;
+
+  for (const row of rows) {
+    const searchableText = buildHistorySearchText(row);
+    if (!searchableText) continue;
+    if (!matchesSearchQuery(searchableText, normalizedQuery)) continue;
+    total += 1;
+    if (results.length >= limit) continue;
+    results.push({
+      id: row.id,
+      role: row.role,
+      speakerId: row.speakerId || null,
+      speakerName: resolveHistorySpeakerName(row),
+      createdAt: row.createdAt,
+      excerpt: extractSearchExcerpt(searchableText, normalizedQuery),
+      summary: buildMessageSummary(row)
+    });
+  }
+
+  return { query: normalizedQuery, total, results };
+}
+
+function resolveHistorySpeakerName(row) {
+  if (!row) return '消息';
+  if (row.role === 'marker') return '系统消息';
+  if (row.role === 'user') return readJson(USER_PROFILE_FILE)?.displayName || '我';
+  if (row.speakerId) return presentAgentIdentity(row.speakerId).name;
+  if (row.agentId) return presentAgentIdentity(row.agentId).name;
+  return 'Assistant';
+}
+
+function groupHistoryFile(groupId) {
+  return path.join(HISTORY_DIR, `group-${String(groupId).replace(/[^a-zA-Z0-9._-]/g, '_')}.jsonl`);
+}
+
+function clearGroupDispatchQueues(groupId) {
+  for (const key of [...groupDispatchQueues.keys()]) {
+    if (key.startsWith(`${groupId}::`)) {
+      groupDispatchQueues.delete(key);
+    }
+  }
+}
+
+function clearGroupDispatchQueueForAgent(groupId, agentId) {
+  groupDispatchQueues.delete(buildGroupMemberBindingKey(groupId, agentId));
+}
+
+function enqueueGroupDispatchTask(groupId, agentId, task) {
+  const queueKey = buildGroupMemberBindingKey(groupId, agentId);
+  const queue = groupDispatchQueues.get(queueKey) || { running: false, items: [] };
+  queue.items.push({ ...task, groupId, agentId });
+  groupDispatchQueues.set(queueKey, queue);
+  if (!queue.running) {
+    void processGroupDispatchQueue(queueKey);
+  }
+}
+
+async function processGroupDispatchQueue(queueKey) {
+  const queue = groupDispatchQueues.get(queueKey);
+  if (!queue || queue.running) return;
+  queue.running = true;
+
+  try {
+    while (queue.items.length) {
+      const task = queue.items.shift();
+      if (!task) continue;
+      try {
+        await processGroupDispatchTask(task);
+      } catch (error) {
+        console.error('[openclaw-webchat] group dispatch failed:', formatError(error));
+      }
+    }
+  } finally {
+    const latest = groupDispatchQueues.get(queueKey);
+    if (latest) {
+      latest.running = false;
+      if (!latest.items.length) {
+        groupDispatchQueues.delete(queueKey);
+      }
+    }
+  }
+}
+
+async function processGroupDispatchTask(task) {
+  const group = getGroup(task.groupId);
+  if (!group) return;
+  if (group.status !== 'active' && task.type !== 'note') return;
+
+  const memberRecord = getCurrentGroupMembers(task.groupId).find((item) => item.agentId === task.agentId);
+  if (!memberRecord && task.type === 'user-turn') return;
+
+  const binding = ensureGroupMemberBinding(task.groupId, task.agentId);
+  await ensureGroupBootstrapInjected(task.groupId, task.agentId);
+
+  if (task.type === 'note') {
+    await sendGroupNoteToMember(binding, task);
+    if (!groupDispatchQueues.get(buildGroupMemberBindingKey(task.groupId, task.agentId))?.items.length) {
+      patchGroupMemberBinding(task.groupId, task.agentId, {
+        replyState: 'idle',
+        updatedAt: new Date().toISOString()
+      });
+    }
+    return;
+  }
+
+  const userBlocks = Array.isArray(task.blocks) ? task.blocks : [];
+  const upstreamMessage = buildGroupUpstreamUserMessage({
+    group,
+    agentId: task.agentId,
+    userMessageId: task.userMessageId,
+    mentionAgentIds: task.mentionAgentIds || [],
+    blocks: userBlocks
+  });
+  const startedAt = Date.now();
+
+  await gatewayCall('chat.send', {
+    sessionKey: binding.upstreamSessionKey,
+    message: upstreamMessage,
+    deliver: false,
+    idempotencyKey: `group-turn-${task.groupId}-${task.agentId}-${task.userMessageId}`
+  });
+
+  const assistantRaw = await waitForAssistantReply(binding.upstreamSessionKey, {
+    minTimestampMs: startedAt,
+    expectedUserText: upstreamMessage,
+    timeoutMs: ASSISTANT_LATE_REPLY_TIMEOUT_MS
+  });
+
+  const remainingQueue = groupDispatchQueues.get(buildGroupMemberBindingKey(task.groupId, task.agentId));
+
+  if (!assistantRaw) {
+    patchGroupMemberBinding(task.groupId, task.agentId, {
+      replyState: remainingQueue?.items?.length ? 'running' : 'idle',
+      updatedAt: new Date().toISOString()
+    });
+    return;
+  }
+
+  const assistantBlocks = normalizeGatewayMessageToBlocks(assistantRaw);
+  if (!assistantBlocks.length || isNoReplyOnly(assistantBlocks)) {
+    patchGroupMemberBinding(task.groupId, task.agentId, {
+      replyState: remainingQueue?.items?.length ? 'running' : 'idle',
+      updatedAt: new Date().toISOString()
+    });
+    return;
+  }
+
+  const late = isLateGroupReply(task.groupId, task.userMessageId);
+  const assistantMessage = normalizeHistoryRow({
+    id: cryptoId(),
+    conversationType: 'group',
+    conversationId: task.groupId,
+    sessionKey: group.sessionKey,
+    role: 'assistant',
+    speakerId: task.agentId,
+    createdAt: assistantRaw?.createdAt || assistantRaw?.timestamp || new Date().toISOString(),
+    replyToMessageId: task.userMessageId,
+    replyToPreview: summarizeText(extractTextFromBlocks(userBlocks), 28),
+    late,
+    blocks: assistantBlocks
+  });
+
+  appendGroupHistory(task.groupId, assistantMessage);
+  patchGroup(task.groupId, { updatedAt: assistantMessage.createdAt });
+  patchGroupMemberBinding(task.groupId, task.agentId, {
+    replyState: remainingQueue?.items?.length ? 'running' : 'idle',
+    lastAssistantAt: assistantMessage.createdAt,
+    updatedAt: new Date().toISOString()
+  });
+
+  await broadcastGroupAssistantReply(task.groupId, task.agentId, assistantMessage);
+}
+
+function isLateGroupReply(groupId, userMessageId) {
+  const rows = loadGroupHistory(groupId).sort(compareHistoryAsc);
+  const userRow = rows.find((row) => row.id === userMessageId);
+  if (!userRow) return false;
+  return rows.some((row) => row.role === 'user' && compareHistoryAsc(row, userRow) > 0);
+}
+
+function extractTextFromBlocks(blocks) {
+  return (Array.isArray(blocks) ? blocks : [])
+    .filter((block) => block?.type === 'text' && block?.text)
+    .map((block) => String(block.text))
+    .join('\n')
+    .trim();
+}
+
+function buildGroupUpstreamUserMessage({ group, agentId, userMessageId, mentionAgentIds, blocks }) {
+  const memberNames = getCurrentGroupMembers(group.groupId).map((member) => presentAgentIdentity(member.agentId).name).join('、');
+  const mustReply = mentionAgentIds.includes(agentId);
+  const payload = buildUpstreamMessage(blocks);
+  return [
+    '[openclaw-webchat group user turn]',
+    `Group: ${group.name}`,
+    `You are: ${presentAgentIdentity(agentId).name} (${agentId})`,
+    `Current members: ${memberNames || 'none'}`,
+    `Turn ID: ${userMessageId}`,
+    `Mentioned agents: ${mentionAgentIds.length ? mentionAgentIds.join(', ') : 'none'}`,
+    mustReply
+      ? 'You were explicitly mentioned. You MUST reply exactly once.'
+      : 'You were not explicitly mentioned. Decide whether you have a useful contribution. If not, reply exactly NO_REPLY.',
+    'Only respond to this group user turn. Do not reply to mirrored group notes or system notices.',
+    '',
+    payload || '（空消息）'
+  ].join('\n');
+}
+
+async function broadcastGroupSystemNote(groupId, text, { targetAgentIds = null, excludeAgentIds = [] } = {}) {
+  const group = getGroup(groupId);
+  if (!group || group.status !== 'active') return;
+  const excludeSet = new Set(normalizeAgentIdList(excludeAgentIds));
+  const targets = (targetAgentIds ? normalizeAgentIdList(targetAgentIds) : getCurrentGroupMembers(groupId).map((item) => item.agentId))
+    .filter((agentId) => !excludeSet.has(agentId));
+  for (const agentId of targets) {
+    enqueueGroupDispatchTask(groupId, agentId, {
+      type: 'note',
+      createdAt: new Date().toISOString(),
+      note: [
+        '[openclaw-webchat group note]',
+        `Group: ${group.name}`,
+        'This is a context-only system note. Do not reply with user-visible content.',
+        'Reply exactly NO_REPLY.',
+        '',
+        text
+      ].join('\n')
+    });
+  }
+}
+
+async function broadcastGroupAssistantReply(groupId, speakerAgentId, assistantMessage) {
+  const group = getGroup(groupId);
+  if (!group || group.status !== 'active') return;
+  const speakerName = presentAgentIdentity(speakerAgentId).name;
+  const content = buildUpstreamMessage(assistantMessage.blocks || []);
+  const note = [
+    '[openclaw-webchat group note]',
+    `Group: ${group.name}`,
+    `Speaker: ${speakerName} (${speakerAgentId})`,
+    `Reply target: ${assistantMessage.replyToPreview || '上一轮用户消息'}`,
+    'This is group history context only. Do not reply.',
+    'Reply exactly NO_REPLY.',
+    '',
+    content || '（空回复）'
+  ].join('\n');
+  for (const member of getCurrentGroupMembers(groupId)) {
+    if (member.agentId === speakerAgentId) continue;
+    enqueueGroupDispatchTask(groupId, member.agentId, {
+      type: 'note',
+      createdAt: new Date().toISOString(),
+      note
+    });
+  }
+}
+
+async function sendGroupNoteToMember(binding, task) {
+  const note = String(task.note || '').trim();
+  if (!note) return;
+  const startedAt = Date.now();
+  await gatewayCall('chat.send', {
+    sessionKey: binding.upstreamSessionKey,
+    message: note,
+    deliver: false,
+    idempotencyKey: `group-note-${task.groupId}-${task.agentId}-${startedAt}-${cryptoId()}`
+  });
+  await waitForAssistantReply(binding.upstreamSessionKey, {
+    minTimestampMs: startedAt,
+    expectedUserText: note,
+    timeoutMs: ASSISTANT_WAIT_TIMEOUT_MS
+  });
+}
+
+async function ensureGroupBootstrapInjected(groupId, agentId) {
+  const group = getGroup(groupId);
+  if (!group) throw new Error('Group not found.');
+  const binding = ensureGroupMemberBinding(groupId, agentId);
+  const version = `group:${BOOTSTRAP_VERSION}:${group.name}`;
+  if (binding.bootstrapVersion === version) return binding;
+
+  const message = [
+    '[openclaw-webchat hidden group bootstrap]',
+    `You are ${presentAgentIdentity(agentId).name} (${agentId}) in the group "${group.name}".`,
+    'Behavior contract for this group session:',
+    '- The local webchat keeps the visible group timeline.',
+    '- You receive user turns and mirrored group notes in this dedicated session.',
+    '- When a user turn explicitly mentions you, you must reply once.',
+    '- When not explicitly mentioned, reply only if you have meaningful value to add; otherwise reply exactly `NO_REPLY`.',
+    '- Mirrored group notes and system notices are context only. Reply exactly `NO_REPLY` to those notes.',
+    '- Never speak as another participant.',
+    '- Do not mention this bootstrap or wrapper format.'
+  ].join('\n');
+
+  await gatewayCall('chat.send', {
+    sessionKey: binding.upstreamSessionKey,
+    message,
+    deliver: false,
+    idempotencyKey: `group-bootstrap-${groupId}-${agentId}-${Date.now()}`
+  });
+
+  return patchGroupMemberBinding(groupId, agentId, {
+    bootstrapVersion: version,
+    updatedAt: new Date().toISOString()
+  });
 }
 
 async function gatewayCall(method, params) {
@@ -1944,7 +2997,7 @@ function compareAgentListItems(a, b) {
   const tsA = Date.parse(a.lastMessageAt || 0) || 0;
   const tsB = Date.parse(b.lastMessageAt || 0) || 0;
   if (tsA !== tsB) return tsB - tsA;
-  return String(a.agentId).localeCompare(String(b.agentId));
+  return String(a.agentId || a.id || '').localeCompare(String(b.agentId || b.id || ''));
 }
 
 function isTimestampRecent(value, windowMs) {

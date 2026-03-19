@@ -4,6 +4,7 @@
 1. 先读本文件
 2. 再读 `docs/HANDOFF-2026-03-18.md`
 3. 需要补背景时再读 `docs/ARCHITECTURE.md`、`docs/ROADMAP.md`、`docs/error.md`
+4. 如果继续开发群聊，改读 `docs/group-chat/README.md`
 
 ## 项目概览
 - 项目名：`openclaw-webchat`
@@ -66,6 +67,7 @@
 - `public/styles.css`：布局、气泡、媒体、移动端与设置页样式
 - `scripts/selftest.mjs`：本地回归脚本
 - `docs/HANDOFF-2026-03-18.md`：当前交接摘要
+- `docs/group-chat/`：群聊专题文档目录，后续继续做群聊时优先从这里读需求和进度
 
 ## 最近主线变更
 - `f27a1d4` `feat: add theme preset variants`
@@ -74,6 +76,8 @@
 
 ## 分支状态
 - 当前开发基点：`main`
+- 当前群聊开发分支：`codex/group-chat-phase1`
+- 当前群聊分支状态：已暂停，后续继续做群聊时先读 `docs/group-chat/`
 - 已合流分支：`codex/mobile-history-test`
 - 仍保留的历史实验分支：
   - `codex/image-bubble-width-experiment`

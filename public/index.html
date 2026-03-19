@@ -30,7 +30,7 @@
         }
       })();
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260318-searchfix6" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260318-groupchat1" />
   </head>
   <body>
     <div class="app-shell">
@@ -44,6 +44,7 @@
         </div>
 
         <div class="sidebar-search-row">
+          <button class="primary-button sidebar-group-create" id="createGroupButton" type="button">新建群聊</button>
           <button class="icon-button desktop-hidden" id="refreshAgentsButton" aria-label="刷新">↻</button>
         </div>
 
@@ -71,6 +72,7 @@
             </div>
           </div>
           <div class="chat-header-actions">
+            <button class="ghost-button hidden" id="manageGroupButton" type="button">管理群聊</button>
             <div class="history-search-shell" id="historySearchShell">
               <form class="history-search-inline-form" id="historySearchForm">
                 <input
@@ -99,9 +101,10 @@
             <form class="composer" id="composerForm">
               <div class="composer-main">
                 <div class="pending-uploads" id="pendingUploads" hidden></div>
+                <div class="mention-menu hidden" id="mentionMenu" aria-label="群成员候选"></div>
                 <textarea
                   id="composerInput"
-                  placeholder="输入消息，Enter 换行；点 / 按钮或直接输入 slash 命令可执行本地命令"
+                  placeholder="输入消息，Enter 换行；群聊里输入 @ 可点名成员"
                   rows="1"
                 ></textarea>
               </div>
@@ -178,6 +181,32 @@
 
                     <div class="settings-actions">
                       <button class="primary-button" id="saveSettingsButton" type="button">保存联系人设置</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-accordion-item">
+              <button class="settings-accordion-button" id="settingsGroupsTab" type="button" data-settings-tab="groups" aria-expanded="false">
+                <span>群聊</span>
+                <span class="settings-accordion-chevron">⌄</span>
+              </button>
+
+              <div class="settings-accordion-panel" id="settingsGroupsSection" data-settings-panel="groups" hidden>
+                <div class="settings-section">
+                  <div class="settings-section-title">群聊</div>
+                  <p class="settings-section-copy">查看当前群聊、已解散群聊和只读历史。主入口仍在左侧，新建后会出现在会话列表里。</p>
+
+                  <div class="settings-card settings-group-card">
+                    <div class="settings-subsection">
+                      <div class="settings-subsection-title">当前群聊</div>
+                      <div class="settings-group-list" id="settingsActiveGroupList"></div>
+                    </div>
+
+                    <div class="settings-subsection">
+                      <div class="settings-subsection-title">已退出 / 已解散</div>
+                      <div class="settings-group-list" id="settingsArchivedGroupList"></div>
                     </div>
                   </div>
                 </div>
@@ -296,6 +325,44 @@
         </div>
       </aside>
 
+      <div class="group-modal-backdrop hidden" id="groupModalBackdrop"></div>
+      <aside class="group-modal hidden" id="groupModal" aria-hidden="true">
+        <div class="group-modal-header">
+          <div>
+            <div class="eyebrow">Group Chat</div>
+            <h3 id="groupModalTitle">新建群聊</h3>
+          </div>
+          <button class="icon-button" id="closeGroupModalButton" type="button" aria-label="关闭群聊面板">✕</button>
+        </div>
+
+        <div class="group-modal-body">
+          <div class="settings-card">
+            <label class="settings-field">
+              <span>群名</span>
+              <input id="groupNameInput" type="text" maxlength="80" placeholder="输入群聊名称" />
+            </label>
+
+            <div class="settings-field">
+              <span>邀请成员</span>
+              <div class="group-member-picker" id="groupMemberPicker"></div>
+            </div>
+
+            <div class="settings-field" id="groupCurrentMembersField">
+              <span>当前成员</span>
+              <div class="group-current-members" id="groupCurrentMembers"></div>
+            </div>
+
+            <div class="group-modal-actions">
+              <button class="primary-button" id="createGroupSubmitButton" type="button">创建群聊</button>
+              <button class="ghost-button hidden" id="renameGroupButton" type="button">保存群名</button>
+              <button class="ghost-button hidden" id="inviteGroupMembersButton" type="button">邀请选中成员</button>
+              <button class="ghost-button hidden" id="leaveGroupButton" type="button">退出群聊</button>
+              <button class="ghost-button hidden" id="dissolveGroupButton" type="button">解散群聊</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
       <div class="media-viewer" id="mediaViewer" hidden aria-hidden="true">
         <div class="media-viewer-toolbar">
           <button class="icon-button media-viewer-button" id="mediaZoomOutButton" type="button" aria-label="缩小">－</button>
@@ -310,6 +377,6 @@
       <div class="message-text"></div>
     </template>
 
-    <script type="module" src="/static/app.js?v=20260318-searchfix6"></script>
+    <script type="module" src="/static/app.js?v=20260318-groupchat1"></script>
   </body>
 </html>

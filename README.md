@@ -12,6 +12,7 @@ OpenClaw WebChat 项目仓库。
 ## 当前阶段
 - 阶段：`0.1.3` 已合入 `main`，在 `0.1.2` 安全/稳定性修复基础上补齐历史搜索第一版及其交互收口，作为后续开发基点继续演进
 - 当前重点：移动端历史加载稳定性、视觉媒体气泡方案收口、多 agent / 迟到回包回归、音频转写成功链路验收、历史搜索第二阶段增强
+- 群聊专题文档：后续继续开发群聊时，先读 `docs/group-chat/README.md`
 
 ## 本地运行
 ```bash
@@ -80,6 +81,10 @@ npm run selftest
 - `docs/PROJECT_CHARTER.md`：项目章程（范围/目标/边界）
 - `docs/ARCHITECTURE.md`：架构草案
 - `docs/ROADMAP.md`：里程碑与迭代节奏
+- `docs/group-chat/README.md`：群聊专题文档入口
+- `docs/group-chat/REQUIREMENTS.md`：群聊需求定义
+- `docs/group-chat/PROGRESS.md`：群聊当前分支进度与验证记录
+- `docs/group-chat/HANDOFF-2026-03-19.md`：群聊分支暂停时的交接摘要
 - `docs/HANDOFF-2026-03-18.md`：最新 `0.1.3` 主线基线摘要与下一步建议
 - `docs/HANDOFF-2026-03-17.md`：上一轮交接摘要
 - `docs/HANDOFF-2026-03-15.md`：上一轮交接记录
