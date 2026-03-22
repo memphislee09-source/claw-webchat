@@ -65,6 +65,9 @@ async function checkPageShell() {
   assert(html.includes('id="historySearchToInput"'), 'page should contain history search end date input');
   assert(html.includes('id="historySearchLimitSelect"'), 'page should contain history search limit select');
   assert(html.includes('id="historySearchResults"'), 'page should contain history search results container');
+  assert(html.includes('id="modelPicker"'), 'page should contain model picker modal');
+  assert(html.includes('id="modelPickerCurrent"'), 'page should contain current model summary');
+  assert(html.includes('id="modelPickerList"'), 'page should contain model picker list');
   assert(html.includes('id="settingsPanel"'), 'page should contain settingsPanel');
   assert(html.includes('id="settingsContactSelect"'), 'page should contain settingsContactSelect');
   assert(html.includes('id="saveSettingsButton"'), 'page should contain saveSettingsButton');
@@ -97,6 +100,8 @@ async function checkPageShell() {
   assert(appJs.includes('const THEME_PRESETS = {'), 'app.js should include theme preset catalog');
   assert(appJs.includes('function renderCommandMenu'), 'app.js should include slash command menu rendering');
   assert(appJs.includes('async function executeSlashCommand'), 'app.js should include slash command execution');
+  assert(appJs.includes('async function openModelPicker'), 'app.js should include model picker loader');
+  assert(appJs.includes('async function switchSessionModel'), 'app.js should include model switch handler');
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
   assert(appJs.includes('function formatPresenceLabel'), 'app.js should include sidebar presence label formatting');
   assert(appJs.includes('function renderMarkdownBlock'), 'app.js should include markdown bubble rendering');
@@ -118,6 +123,9 @@ async function checkPageShell() {
   assert(css.includes('.message-row.search-target .message-bubble'), 'styles.css should include search target highlight styles');
   assert(css.includes('.message-list.showing-history-target > :first-child'), 'styles.css should disable bottom anchoring when showing a history target');
   assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
+  assert(css.includes('.model-picker'), 'styles.css should include model picker overlay styles');
+  assert(css.includes('.model-picker-card'), 'styles.css should include model picker card styles');
+  assert(css.includes('.model-picker-option'), 'styles.css should include model picker option styles');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
   assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
   assert(css.includes('.message-list > :first-child'), 'styles.css should use first-child auto margin for bottom anchoring');
@@ -272,6 +280,23 @@ async function checkSlashCommands() {
   assert(modelText.includes('当前模型：'), '/model should return current model info');
   const currentModel = modelText.match(/当前模型：([^\n]+)/)?.[1]?.trim();
   assert(currentModel, '/model should expose current model');
+
+  const modelOptions = await getJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/model-options`);
+  assert(modelOptions?.current?.provider, 'model-options should return current provider');
+  assert(modelOptions?.current?.model, 'model-options should return current model');
+  assert(Array.isArray(modelOptions?.models), 'model-options should return model list');
+  assert(modelOptions.models.length > 0, 'model-options should include at least one selectable model');
+  const currentOption = modelOptions.models.find((item) => (
+    item?.provider === modelOptions.current.provider && item?.model === modelOptions.current.model
+  )) || modelOptions.models[0];
+
+  const modelPatch = await patchJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/model`, {
+    provider: currentOption.provider,
+    model: currentOption.model
+  });
+  assert(modelPatch?.ok === true, 'model patch endpoint should succeed');
+  assert(modelPatch?.current?.provider === currentOption.provider, 'model patch endpoint should persist provider');
+  assert(modelPatch?.current?.model === currentOption.model, 'model patch endpoint should persist model');
 
   const modelSet = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
     command: `/model ${currentModel}`

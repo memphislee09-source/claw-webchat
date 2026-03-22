@@ -24,6 +24,7 @@ A standalone WebChat for OpenClaw with long-lived per-agent history, local media
 - Preserves local history across `/new` while resetting only the upstream context
 - Provides a dedicated web UI with agent list, search, settings, avatars, and responsive layout
 - Adds local slash command handling for common session and model operations
+- Lets `/model` open an agent-scoped picker that shows the current model and available `provider/model` targets
 - Adds date-filtered history search with stronger matching and larger result windows
 
 ## Scope And Non-Goals
@@ -75,6 +76,7 @@ The settings UI now includes:
 - an interface language switch with Simplified Chinese and English
 - access mode switching between local-only and LAN / Tailscale-friendly binding
 - optional light authentication for shared LAN-style access
+- an agent-scoped `/model` picker that can switch the current upstream session model directly
 - an About section with project summary and GitHub link
 - a Manual Start section with install, start, and restart command hints
 - a reminder when a service restart is required for access-mode changes
@@ -143,6 +145,7 @@ npm run selftest
 - Rich media parsing with structured blocks plus `MEDIA:` / `mediaUrl:` fallbacks
 - Search within the current agent timeline with jump-to-hit and keyword highlight
 - History search phase 2 first slice with date filters, larger result sets, and stronger matching
+- Agent-scoped model picker for `/model` / `/models`, including current-model summary and direct model switching
 - Responsive layout for desktop, tablet, and mobile drawer navigation
 - User and agent avatar/profile customization
 - Theme presets and lighter chat-bubble visual treatment

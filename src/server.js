@@ -284,6 +284,59 @@ app.post('/api/openclaw-webchat/sessions/:sessionKey/command', async (req, res) 
   }
 });
 
+app.get('/api/openclaw-webchat/sessions/:sessionKey/model-options', async (req, res) => {
+  const { sessionKey } = req.params;
+  const sessionBinding = getBindingBySessionKey(sessionKey);
+
+  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+
+  try {
+    const payload = await loadModelCommandState(sessionBinding.upstreamSessionKey);
+    res.json({
+      current: payload.current,
+      models: payload.models,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.patch('/api/openclaw-webchat/sessions/:sessionKey/model', async (req, res) => {
+  const { sessionKey } = req.params;
+  const sessionBinding = getBindingBySessionKey(sessionKey);
+  const provider = normalizeOptionalString(req.body?.provider);
+  const model = normalizeOptionalString(req.body?.model);
+
+  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+  if (!provider || !model) {
+    return res.status(400).json({ error: 'provider and model are required.' });
+  }
+
+  try {
+    const currentState = await loadModelCommandState(sessionBinding.upstreamSessionKey);
+    const target = currentState.models.find((item) => item.provider === provider && item.model === model);
+    if (!target) {
+      return res.status(400).json({ error: `Unknown model selection: ${formatModelDescriptorLabel(provider, model)}` });
+    }
+
+    await gatewayCall('sessions.patch', {
+      key: sessionBinding.upstreamSessionKey,
+      model: target.label
+    });
+
+    const nextState = await loadModelCommandState(sessionBinding.upstreamSessionKey);
+    res.json({
+      ok: true,
+      current: nextState.current,
+      models: nextState.models,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
 app.patch('/api/openclaw-webchat/agents/:agentId/profile', (req, res) => {
   const { agentId } = req.params;
   const displayName = normalizeOptionalString(req.body?.displayName);
@@ -728,22 +781,17 @@ function buildAssistantSlashResponse(binding, command, text) {
 async function runModelSlashCommand(binding, command, commandName, args) {
   const mode = String(args || '').trim();
   const normalizedMode = mode.toLowerCase();
+  let modelState = null;
 
   try {
-    const [sessionState, modelsInfo] = await Promise.all([
-      loadUpstreamSessionState(binding.upstreamSessionKey),
-      gatewayCall('models.list', {})
-    ]);
-    const currentModel = normalizeOptionalString(sessionState?.session?.model)
-      || normalizeOptionalString(sessionState?.defaults?.model)
-      || 'default';
-    const catalogModelIds = collectCatalogModelIds(modelsInfo?.models);
-    const available = catalogModelIds.slice(0, 10);
+    modelState = await loadModelCommandState(binding.upstreamSessionKey);
+    const currentModel = modelState.current?.label || modelState.current?.model || 'default';
+    const available = modelState.models.slice(0, 10).map((item) => item.label);
 
     if (!mode || normalizedMode === 'list' || commandName === '/models') {
       const lines = [`当前模型：${currentModel}`];
       if (available.length) {
-        lines.push(`可用模型：${available.join(', ')}${catalogModelIds.length > available.length ? ` +${catalogModelIds.length - available.length} more` : ''}`);
+        lines.push(`可用模型：${available.join(', ')}${modelState.models.length > available.length ? ` +${modelState.models.length - available.length} more` : ''}`);
       }
       lines.push('提示：发送 /model <name> 切换模型。');
       return buildAssistantSlashResponse(binding, command, lines.join('\n'));
@@ -752,16 +800,16 @@ async function runModelSlashCommand(binding, command, commandName, args) {
     if (normalizedMode === 'status') {
       const detailLines = [
         '当前模型状态：',
-        `- model: ${currentModel}`
+        `- model: ${modelState.current?.model || 'default'}`
       ];
-      if (normalizeOptionalString(sessionState?.session?.modelProvider)) {
-        detailLines.push(`- provider: ${sessionState.session.modelProvider}`);
+      if (modelState.current?.provider) {
+        detailLines.push(`- provider: ${modelState.current.provider}`);
       }
-      if (normalizeOptionalString(sessionState?.session?.baseUrl)) {
-        detailLines.push(`- baseUrl: ${sessionState.session.baseUrl}`);
+      if (normalizeOptionalString(modelState.session?.baseUrl)) {
+        detailLines.push(`- baseUrl: ${modelState.session.baseUrl}`);
       }
-      if (normalizeOptionalString(sessionState?.session?.api)) {
-        detailLines.push(`- api: ${sessionState.session.api}`);
+      if (normalizeOptionalString(modelState.session?.api)) {
+        detailLines.push(`- api: ${modelState.session.api}`);
       }
       return buildAssistantSlashResponse(binding, command, detailLines.join('\n'));
     }
@@ -769,10 +817,19 @@ async function runModelSlashCommand(binding, command, commandName, args) {
     return buildAssistantSlashResponse(binding, command, `获取模型信息失败：${formatError(error)}`);
   }
 
-  const targetModel = mode;
+  const target = resolveRequestedModelTarget(mode, modelState?.models, modelState?.current);
+  if (target?.error) {
+    return buildAssistantSlashResponse(binding, command, target.error);
+  }
+
+  const patch = {
+    key: binding.upstreamSessionKey,
+    model: target.label || target.model
+  };
+
   try {
-    await gatewayCall('sessions.patch', { key: binding.upstreamSessionKey, model: targetModel });
-    return buildAssistantSlashResponse(binding, command, `已设置模型：${targetModel}`);
+    await gatewayCall('sessions.patch', patch);
+    return buildAssistantSlashResponse(binding, command, `已设置模型：${target.label}`);
   } catch (error) {
     return buildAssistantSlashResponse(binding, command, `设置模型失败：${formatError(error)}`);
   }
@@ -1022,19 +1079,135 @@ async function loadThinkingCommandState(sessionKey) {
   };
 }
 
-function collectCatalogModelIds(models) {
+async function loadModelCommandState(sessionKey) {
+  const [sessionState, modelsInfo] = await Promise.all([
+    loadUpstreamSessionState(sessionKey),
+    gatewayCall('models.list', {})
+  ]);
+  const models = presentModelCatalog(modelsInfo?.models);
+  return {
+    session: sessionState.session,
+    defaults: sessionState.defaults,
+    current: resolveCurrentModelDescriptor(sessionState, models),
+    models
+  };
+}
+
+function presentModelCatalog(models) {
   const seen = new Set();
   const out = [];
   const rows = Array.isArray(models) ? models : [];
 
   for (const item of rows) {
-    const modelId = normalizeOptionalString(item?.id);
-    if (!modelId || seen.has(modelId)) continue;
-    seen.add(modelId);
-    out.push(modelId);
+    const provider = normalizeOptionalString(item?.provider) || 'default';
+    const model = normalizeOptionalString(item?.id);
+    if (!model) continue;
+    const dedupeKey = `${provider}\u0000${model}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({
+      provider,
+      model,
+      label: formatModelDescriptorLabel(provider, model),
+      name: normalizeOptionalString(item?.name),
+      reasoning: item?.reasoning === true,
+      input: Array.isArray(item?.input) ? item.input.map((value) => String(value || '').trim()).filter(Boolean) : [],
+      contextWindow: Number.isFinite(Number(item?.contextWindow)) ? Number(item.contextWindow) : null
+    });
   }
 
-  return out;
+  return out.sort((left, right) => left.label.localeCompare(right.label, 'en'));
+}
+
+function resolveCurrentModelDescriptor(sessionState, models = []) {
+  const sessionProvider = normalizeOptionalString(sessionState?.session?.modelProvider);
+  const defaultProvider = normalizeOptionalString(sessionState?.defaults?.modelProvider);
+  const sessionModel = normalizeOptionalString(sessionState?.session?.model);
+  const defaultModel = normalizeOptionalString(sessionState?.defaults?.model);
+  const provider = sessionProvider || defaultProvider || null;
+  const model = sessionModel || defaultModel || 'default';
+
+  let matched = null;
+  if (provider) {
+    matched = models.find((item) => item.provider === provider && item.model === model) || null;
+  }
+
+  if (!matched && model) {
+    const matches = models.filter((item) => item.model === model);
+    if (matches.length === 1) {
+      matched = matches[0];
+    }
+  }
+
+  if (matched) {
+    return {
+      ...matched,
+      available: true
+    };
+  }
+
+  const fallbackProvider = provider || 'default';
+  return {
+    provider: fallbackProvider,
+    model,
+    label: formatModelDescriptorLabel(fallbackProvider, model),
+    name: null,
+    reasoning: null,
+    input: [],
+    contextWindow: null,
+    available: false
+  };
+}
+
+function formatModelDescriptorLabel(provider, model) {
+  const safeProvider = normalizeOptionalString(provider) || 'default';
+  const safeModel = normalizeOptionalString(model) || 'default';
+  return `${safeProvider}/${safeModel}`;
+}
+
+function resolveRequestedModelTarget(rawValue, models = [], current = null) {
+  const raw = String(rawValue || '').trim();
+  if (!raw) {
+    return { error: '请提供要切换到的模型。' };
+  }
+
+  const exactLabelMatch = models.find((item) => item.label.toLowerCase() === raw.toLowerCase());
+  if (exactLabelMatch) return exactLabelMatch;
+
+  const slashIndex = raw.indexOf('/');
+  if (slashIndex > 0) {
+    const provider = normalizeOptionalString(raw.slice(0, slashIndex));
+    const model = normalizeOptionalString(raw.slice(slashIndex + 1));
+    if (!provider || !model) {
+      return { error: `未识别的模型：${raw}` };
+    }
+
+    const exact = models.find((item) => item.provider === provider && item.model === model);
+    if (exact) return exact;
+    return {
+      provider,
+      model,
+      label: formatModelDescriptorLabel(provider, model)
+    };
+  }
+
+  const matches = models.filter((item) => item.model === raw);
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    const currentMatch = current
+      ? matches.find((item) => item.provider === current.provider && item.model === current.model)
+      : null;
+    if (currentMatch) return currentMatch;
+    return {
+      error: `模型 ${raw} 同时存在于多个 provider，请使用 provider/model 形式，例如 openai-codex/${raw}。`
+    };
+  }
+
+  return {
+    provider: null,
+    model: raw,
+    label: raw
+  };
 }
 
 function normalizeThinkLevel(value) {

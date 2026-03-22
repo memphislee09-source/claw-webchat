@@ -101,7 +101,11 @@ const I18N = {
       enterWebChat: '进入 WebChat',
       serviceRestart: 'Service Restart',
       serviceRestarting: '服务正在重启',
-      theme: '界面主题'
+      theme: '界面主题',
+      modelPicker: '切换模型',
+      closeModelPicker: '关闭模型切换',
+      currentModel: '当前模型',
+      availableModels: '可用模型'
     },
     text: {
       contactsIntro: '统一管理用户自己和所有 agent 的显示名称与头像。头像选择本地图片后会自动裁成正方形，点击保存后才生效。',
@@ -124,7 +128,9 @@ const I18N = {
       selfManageTitle: '手动启动服务',
       authGateCopy: '当前实例已开启轻认证。输入访问口令后继续使用 WebChat。'
       ,
-      projectSummary: '一个面向个人使用的 OpenClaw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。'
+      projectSummary: '一个面向个人使用的 OpenClaw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
+      modelPickerIntro: '下面列出当前可用模型，选择后会直接切换这个 agent 的上游会话模型。',
+      modelPickerCurrentMissing: '当前模型未出现在可用列表里，你仍然可以从下面选择新模型。'
     },
     status: {
       initFailed: '初始化失败：{error}',
@@ -178,6 +184,13 @@ const I18N = {
       commandResetDone: '上游上下文已重置，本地历史已保留。',
       commandCompactDone: '压缩命令已执行。',
       commandDone: '{name} 已执行。',
+      loadingModelOptions: '正在加载可用模型…',
+      modelOptionsFailed: '加载可用模型失败：{error}',
+      noAvailableModels: '当前没有可切换的模型。',
+      switchingModel: '正在切换模型到 {model}…',
+      modelSwitchDone: '模型已切换到 {model}。',
+      modelSwitchFailed: '模型切换失败：{error}',
+      currentModelUnavailable: '当前模型不在可用列表里。',
       timelineLongLived: '长期主时间线',
       clickToCreate: '点击后自动创建',
       noSummary: '暂无摘要',
@@ -307,7 +320,11 @@ const I18N = {
       enterWebChat: 'Enter WebChat',
       serviceRestart: 'Service Restart',
       serviceRestarting: 'Service Restarting',
-      theme: 'Theme'
+      theme: 'Theme',
+      modelPicker: 'Switch Model',
+      closeModelPicker: 'Close model picker',
+      currentModel: 'Current Model',
+      availableModels: 'Available Models'
     },
     text: {
       contactsIntro: 'Manage display names and avatars for yourself and all agents. Local avatar images are cropped to a square and only apply after you save.',
@@ -330,7 +347,9 @@ const I18N = {
       selfManageTitle: 'Manual Start',
       authGateCopy: 'Light authentication is enabled for this instance. Enter the access password to continue.'
       ,
-      projectSummary: 'A personal-use OpenClaw WebChat focused on local-first usage, long-lived history, media uploads, and smoother agent conversations.'
+      projectSummary: 'A personal-use OpenClaw WebChat focused on local-first usage, long-lived history, media uploads, and smoother agent conversations.',
+      modelPickerIntro: 'Available models are listed below. Selecting one switches the upstream model for this agent immediately.',
+      modelPickerCurrentMissing: 'The current model is not in the available list, but you can still switch to one below.'
     },
     status: {
       initFailed: 'Initialization failed: {error}',
@@ -384,6 +403,13 @@ const I18N = {
       commandResetDone: 'Upstream context was reset while local history was kept.',
       commandCompactDone: 'Compact command completed.',
       commandDone: '{name} completed.',
+      loadingModelOptions: 'Loading available models…',
+      modelOptionsFailed: 'Failed to load available models: {error}',
+      noAvailableModels: 'No switchable models are available right now.',
+      switchingModel: 'Switching model to {model}…',
+      modelSwitchDone: 'Model switched to {model}.',
+      modelSwitchFailed: 'Failed to switch model: {error}',
+      currentModelUnavailable: 'The current model is not in the available list.',
       timelineLongLived: 'Long-lived main timeline',
       clickToCreate: 'Click to create automatically',
       noSummary: 'No summary yet',
@@ -477,6 +503,12 @@ const state = {
   openRequestId: 0,
   commandCatalog: [],
   allowedCommands: new Set(),
+  modelPickerOpen: false,
+  modelPickerLoading: false,
+  modelPickerError: '',
+  modelPickerCurrent: null,
+  modelPickerOptions: [],
+  modelPickerSwitchingLabel: '',
   historySearchOpen: false,
   historySearchQuery: '',
   historySearchResults: [],
@@ -632,6 +664,14 @@ const mediaViewerImageEl = document.getElementById('mediaViewerImage');
 const mediaZoomOutButtonEl = document.getElementById('mediaZoomOutButton');
 const mediaResetZoomButtonEl = document.getElementById('mediaResetZoomButton');
 const mediaZoomInButtonEl = document.getElementById('mediaZoomInButton');
+const modelPickerEl = document.getElementById('modelPicker');
+const modelPickerTitleEl = document.getElementById('modelPickerTitle');
+const modelPickerCopyEl = document.getElementById('modelPickerCopy');
+const modelPickerCurrentLabelEl = document.getElementById('modelPickerCurrentLabel');
+const modelPickerCurrentEl = document.getElementById('modelPickerCurrent');
+const modelPickerMessageEl = document.getElementById('modelPickerMessage');
+const modelPickerListEl = document.getElementById('modelPickerList');
+const closeModelPickerButtonEl = document.getElementById('closeModelPickerButton');
 const authGateEl = document.getElementById('authGate');
 const authGateCopyEl = document.getElementById('authGateCopy');
 const authLoginFormEl = document.getElementById('authLoginForm');
@@ -734,6 +774,9 @@ function bindEvents() {
     event.stopPropagation();
     adjustMediaViewerScale(0.2);
   });
+  closeModelPickerButtonEl?.addEventListener('click', () => closeModelPicker());
+  modelPickerEl?.addEventListener('click', handleModelPickerBackdropClick);
+  modelPickerListEl?.addEventListener('click', handleModelPickerOptionClick);
 
   window.addEventListener('resize', () => {
     if (window.innerWidth > 900) toggleSidebar(false);
@@ -792,6 +835,7 @@ function themeText(choice, field) {
 function handleLanguageChange() {
   persistLanguage(settingsLanguageSelectEl?.value || 'zh-CN');
   renderLocalizedChrome();
+  renderModelPicker();
   renderThemePresetControls();
   renderAgentList({ refreshIdentity: false });
   updateHeader();
@@ -847,6 +891,11 @@ function renderLocalizedChrome() {
   if (mediaResetZoomButtonEl) mediaResetZoomButtonEl.setAttribute('aria-label', t('ui.resetZoom'));
   if (mediaZoomInButtonEl) mediaZoomInButtonEl.setAttribute('aria-label', t('ui.zoomIn'));
   if (mediaViewerImageEl && !state.mediaViewerOpen) mediaViewerImageEl.alt = t('ui.imagePreview');
+  if (modelPickerEl) modelPickerEl.setAttribute('aria-label', t('ui.modelPicker'));
+  if (modelPickerTitleEl) modelPickerTitleEl.textContent = t('ui.modelPicker');
+  if (modelPickerCopyEl) modelPickerCopyEl.textContent = t('text.modelPickerIntro');
+  if (modelPickerCurrentLabelEl) modelPickerCurrentLabelEl.textContent = t('ui.currentModel');
+  if (closeModelPickerButtonEl) closeModelPickerButtonEl.setAttribute('aria-label', t('ui.closeModelPicker'));
   settingsButtonEl?.querySelectorAll('span')?.[1] && (settingsButtonEl.querySelectorAll('span')[1].textContent = openSettingsLabel);
   settingsPanelEl?.querySelector('.eyebrow') && (settingsPanelEl.querySelector('.eyebrow').textContent = t('ui.workspaceSettings'));
   settingsPanelEl?.querySelector('h3') && (settingsPanelEl.querySelector('h3').textContent = t('ui.settings'));
@@ -1133,6 +1182,7 @@ async function loadAuthenticatedApp({ force = false } = {}) {
 
 function lockAppForAuth() {
   state.appReady = false;
+  closeModelPicker({ preserveData: false });
   releasePendingUploads(state.pendingUploads);
   state.agents = [];
   state.activeAgentId = null;
@@ -1376,6 +1426,7 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   if (!agentId) return;
   if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
   if (state.activeAgentId !== agentId) {
+    closeModelPicker({ preserveData: false });
     resetHistorySearch({ keepOpen: false });
   }
 
@@ -2453,6 +2504,10 @@ function localizeCommandItem(item) {
 
 async function executeSlashCommand(command) {
   if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  if (shouldOpenModelPicker(command)) {
+    await openModelPicker();
+    return;
+  }
   const targetSessionKey = state.activeSessionKey;
   const targetAgentId = state.activeAgentId;
   const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
@@ -2491,14 +2546,35 @@ function normalizeSlashCommandName(command) {
   return raw.startsWith('/') ? raw : `/${raw}`;
 }
 
+function parseSlashCommandInput(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed.startsWith('/')) return null;
+  const body = trimmed.slice(1);
+  const firstSeparator = body.search(/[\s:]/u);
+  const rawName = firstSeparator === -1 ? body : body.slice(0, firstSeparator);
+  let remainder = firstSeparator === -1 ? '' : body.slice(firstSeparator).trimStart();
+  if (remainder.startsWith(':')) remainder = remainder.slice(1).trimStart();
+  const name = normalizeSlashCommandName(rawName);
+  if (!name || name === '/') return null;
+  return {
+    name,
+    args: remainder.trim()
+  };
+}
+
 function getSlashCommandName(text) {
-  const parsed = String(text || '').trim().match(/^\/([^\s:]+)(?:\s*:?\s*.*)?$/u);
-  if (!parsed) return '';
-  return normalizeSlashCommandName(parsed[1]);
+  return parseSlashCommandInput(text)?.name || '';
 }
 
 function isWhitelistedSlash(commandName) {
   return state.allowedCommands.has(normalizeSlashCommandName(commandName));
+}
+
+function shouldOpenModelPicker(command) {
+  const parsed = parseSlashCommandInput(command);
+  if (!parsed) return false;
+  if (parsed.name !== '/model' && parsed.name !== '/models') return false;
+  return !parsed.args;
 }
 
 function updateHeader() {
@@ -2509,11 +2585,201 @@ function updateHeader() {
     : t('ui.selectAgent');
   headerPresenceEl.className = `presence-dot ${normalizePresence(active?.presence || 'idle')}`;
   if (!active) {
+    if (state.modelPickerOpen) {
+      closeModelPicker({ preserveData: false });
+    }
     state.historySearchOpen = false;
     state.historySearchRecentQueries = [];
     state.historySearchShowingRecents = false;
   }
   renderHistorySearchPanel();
+}
+
+function normalizeModelOption(option) {
+  const model = String(option?.model || '').trim();
+  if (!model) return null;
+  const provider = String(option?.provider || '').trim() || 'default';
+  const name = String(option?.name || '').trim();
+  return {
+    provider,
+    model,
+    label: String(option?.label || `${provider}/${model}`).trim() || `${provider}/${model}`,
+    name: name || null,
+    reasoning: option?.reasoning === true,
+    input: Array.isArray(option?.input) ? option.input.map((item) => String(item || '').trim()).filter(Boolean) : [],
+    available: option?.available !== false
+  };
+}
+
+function isSameModelOption(left, right) {
+  if (!left || !right) return false;
+  return left.provider === right.provider && left.model === right.model;
+}
+
+function closeModelPicker({ preserveData = true } = {}) {
+  state.modelPickerOpen = false;
+  state.modelPickerLoading = false;
+  state.modelPickerSwitchingLabel = '';
+  if (!preserveData) {
+    state.modelPickerError = '';
+    state.modelPickerCurrent = null;
+    state.modelPickerOptions = [];
+  }
+  renderModelPicker();
+}
+
+async function openModelPicker() {
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  const targetSessionKey = state.activeSessionKey;
+
+  state.modelPickerOpen = true;
+  state.modelPickerLoading = true;
+  state.modelPickerError = '';
+  state.modelPickerCurrent = null;
+  state.modelPickerOptions = [];
+  state.modelPickerSwitchingLabel = '';
+  renderModelPicker();
+  showStatus(t('status.loadingModelOptions'), 'info');
+
+  try {
+    const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/model-options`);
+    if (state.activeSessionKey !== targetSessionKey) return;
+    state.modelPickerCurrent = normalizeModelOption(payload?.current);
+    state.modelPickerOptions = Array.isArray(payload?.models)
+      ? payload.models.map(normalizeModelOption).filter(Boolean)
+      : [];
+    state.modelPickerLoading = false;
+    state.modelPickerError = state.modelPickerOptions.length ? '' : t('status.noAvailableModels');
+    renderModelPicker();
+  } catch (error) {
+    if (state.activeSessionKey !== targetSessionKey) return;
+    state.modelPickerLoading = false;
+    state.modelPickerError = t('status.modelOptionsFailed', { error: formatError(error) });
+    renderModelPicker();
+    showStatus(state.modelPickerError, 'error');
+  }
+}
+
+function renderModelPicker() {
+  if (!modelPickerEl || !modelPickerCurrentEl || !modelPickerListEl || !modelPickerMessageEl) return;
+
+  const open = state.modelPickerOpen;
+  modelPickerEl.hidden = !open;
+  modelPickerEl.classList.toggle('hidden', !open);
+  modelPickerEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+
+  const currentLabel = state.modelPickerCurrent?.label
+    || (state.modelPickerLoading ? t('status.loadingModelOptions') : '—');
+  modelPickerCurrentEl.textContent = currentLabel;
+  modelPickerCurrentEl.classList.toggle('muted', state.modelPickerCurrent?.available === false);
+
+  const message = state.modelPickerError
+    || (state.modelPickerCurrent?.available === false ? t('text.modelPickerCurrentMissing') : '')
+    || (state.modelPickerSwitchingLabel ? t('status.switchingModel', { model: state.modelPickerSwitchingLabel }) : '')
+    || (state.modelPickerLoading ? t('status.loadingModelOptions') : t('text.modelPickerIntro'));
+  modelPickerMessageEl.textContent = message;
+  modelPickerMessageEl.classList.toggle('error', Boolean(state.modelPickerError));
+
+  if (closeModelPickerButtonEl) {
+    closeModelPickerButtonEl.disabled = Boolean(state.modelPickerSwitchingLabel);
+  }
+  modelPickerListEl.innerHTML = '';
+
+  if (!state.modelPickerOptions.length) {
+    const empty = document.createElement('div');
+    empty.className = 'model-picker-empty';
+    empty.textContent = state.modelPickerLoading ? t('status.loadingModelOptions') : (state.modelPickerError || t('status.noAvailableModels'));
+    modelPickerListEl.append(empty);
+    return;
+  }
+
+  for (const option of state.modelPickerOptions) {
+    modelPickerListEl.append(createModelPickerOption(option));
+  }
+}
+
+function createModelPickerOption(option) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'model-picker-option';
+  button.dataset.provider = option.provider;
+  button.dataset.model = option.model;
+
+  const isCurrent = isSameModelOption(option, state.modelPickerCurrent);
+  const isSwitching = Boolean(state.modelPickerSwitchingLabel) && state.modelPickerSwitchingLabel === option.label;
+  button.classList.toggle('active', isCurrent);
+  button.disabled = state.modelPickerLoading || Boolean(state.modelPickerSwitchingLabel);
+  button.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+
+  const textWrap = document.createElement('span');
+  textWrap.className = 'model-picker-option-text';
+
+  const label = document.createElement('span');
+  label.className = 'model-picker-option-label';
+  label.textContent = option.label;
+
+  const meta = document.createElement('span');
+  meta.className = 'model-picker-option-meta';
+  meta.textContent = option.name && option.name !== option.label ? option.name : option.model;
+
+  const badge = document.createElement('span');
+  badge.className = 'model-picker-option-badge';
+  badge.textContent = isSwitching
+    ? (state.language === 'en' ? 'Switching' : '切换中')
+    : (isCurrent ? t('ui.currentModel') : (state.language === 'en' ? 'Available' : '可切换'));
+
+  textWrap.append(label, meta);
+  button.append(textWrap, badge);
+  return button;
+}
+
+function handleModelPickerBackdropClick(event) {
+  if (event.target !== modelPickerEl) return;
+  if (state.modelPickerSwitchingLabel) return;
+  closeModelPicker();
+}
+
+async function handleModelPickerOptionClick(event) {
+  const button = event.target.closest('.model-picker-option');
+  if (!button || !state.modelPickerOpen) return;
+  const provider = button.dataset.provider;
+  const model = button.dataset.model;
+  const option = state.modelPickerOptions.find((item) => item.provider === provider && item.model === model);
+  if (!option || isSameModelOption(option, state.modelPickerCurrent)) return;
+  await switchSessionModel(option);
+}
+
+async function switchSessionModel(option) {
+  if (!state.activeSessionKey) return;
+  const targetSessionKey = state.activeSessionKey;
+  const targetLabel = option.label || `${option.provider}/${option.model}`;
+
+  state.modelPickerError = '';
+  state.modelPickerSwitchingLabel = targetLabel;
+  renderModelPicker();
+  showStatus(t('status.switchingModel', { model: targetLabel }), 'info');
+
+  try {
+    const payload = await apiPatch(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/model`, {
+      provider: option.provider,
+      model: option.model
+    });
+    if (state.activeSessionKey !== targetSessionKey) return;
+    state.modelPickerCurrent = normalizeModelOption(payload?.current) || option;
+    state.modelPickerOptions = Array.isArray(payload?.models)
+      ? payload.models.map(normalizeModelOption).filter(Boolean)
+      : state.modelPickerOptions;
+    state.modelPickerSwitchingLabel = '';
+    renderModelPicker();
+    closeModelPicker();
+    showStatus(t('status.modelSwitchDone', { model: state.modelPickerCurrent?.label || targetLabel }), 'success');
+  } catch (error) {
+    if (state.activeSessionKey !== targetSessionKey) return;
+    state.modelPickerSwitchingLabel = '';
+    state.modelPickerError = t('status.modelSwitchFailed', { error: formatError(error) });
+    renderModelPicker();
+    showStatus(state.modelPickerError, 'error');
+  }
 }
 
 function createAvatarElement({ className, avatarUrl, label, fallbackText }) {
@@ -3096,6 +3362,10 @@ function handleWindowKeydown(event) {
   }
 
   if (event.key === 'Escape') {
+    if (state.modelPickerOpen) {
+      closeModelPicker();
+      return;
+    }
     if (state.historySearchOpen) {
       setHistorySearchOpen(false);
       historySearchInputEl?.blur();

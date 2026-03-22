@@ -444,6 +444,28 @@
         <img class="media-viewer-image" id="mediaViewerImage" alt="图片预览" />
       </div>
 
+      <div class="model-picker hidden" id="modelPicker" hidden aria-hidden="true">
+        <div class="model-picker-card" role="dialog" aria-modal="true" aria-labelledby="modelPickerTitle">
+          <div class="model-picker-header">
+            <div>
+              <div class="eyebrow">Model</div>
+              <h2 id="modelPickerTitle">切换模型</h2>
+            </div>
+            <button class="icon-button" id="closeModelPickerButton" type="button" aria-label="关闭模型切换">✕</button>
+          </div>
+
+          <p class="settings-section-copy" id="modelPickerCopy">下面列出当前可用模型，选择后会直接切换这个 agent 的上游会话模型。</p>
+
+          <div class="model-picker-current-card">
+            <div class="model-picker-current-label" id="modelPickerCurrentLabel">当前模型</div>
+            <div class="model-picker-current-value" id="modelPickerCurrent">—</div>
+          </div>
+
+          <div class="model-picker-message" id="modelPickerMessage">正在加载可用模型…</div>
+          <div class="model-picker-list" id="modelPickerList"></div>
+        </div>
+      </div>
+
       <div class="auth-gate hidden" id="authGate" aria-hidden="true">
         <div class="auth-gate-card">
           <div class="eyebrow">Access Gate</div>

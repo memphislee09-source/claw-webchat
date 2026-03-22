@@ -1501,6 +1501,174 @@ button {
   transition: none;
 }
 
+.model-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(7, 10, 20, 0.56);
+  backdrop-filter: blur(10px);
+}
+
+.model-picker[hidden] {
+  display: none;
+}
+
+.model-picker-card {
+  width: min(640px, 100%);
+  max-height: min(78vh, 760px);
+  border-radius: 28px;
+  border: 1px solid var(--line);
+  background: var(--settings-panel-bg);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.model-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-picker-header h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.model-picker-current-card {
+  border-radius: 22px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(15, 23, 42, 0.08));
+  padding: 16px 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.model-picker-current-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.model-picker-current-value {
+  font-size: 18px;
+  font-weight: 700;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.model-picker-current-value.muted {
+  color: var(--muted);
+}
+
+.model-picker-message {
+  min-height: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.model-picker-message.error {
+  color: #fca5a5;
+}
+
+.model-picker-list {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.model-picker-option,
+.model-picker-empty {
+  width: 100%;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface-3);
+}
+
+.model-picker-option {
+  padding: 14px 16px;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.model-picker-option:hover,
+.model-picker-option:focus-visible {
+  border-color: rgba(59, 130, 246, 0.36);
+  background: var(--surface-2);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.model-picker-option:disabled {
+  opacity: 0.72;
+  transform: none;
+  cursor: default;
+}
+
+.model-picker-option.active {
+  border-color: rgba(59, 130, 246, 0.44);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(37, 99, 235, 0.1));
+}
+
+.model-picker-option-text {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.model-picker-option-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.model-picker-option-meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.model-picker-option-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.model-picker-option.active .model-picker-option-badge {
+  color: var(--brand);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.model-picker-empty {
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
 .app-shell.settings-open .settings-backdrop {
   opacity: 1;
   pointer-events: auto;
@@ -2003,6 +2171,10 @@ button {
     width: min(92vw, 440px);
   }
 
+  .model-picker-card {
+    width: min(92vw, 640px);
+  }
+
 }
 
 @media (max-width: 640px) {
@@ -2056,6 +2228,28 @@ button {
   .chat-subtitle,
   #headerRefreshButton {
     display: none;
+  }
+
+  .model-picker {
+    padding: 16px;
+  }
+
+  .model-picker-card {
+    padding: 18px;
+    max-height: min(84vh, 760px);
+  }
+
+  .model-picker-header h2 {
+    font-size: 24px;
+  }
+
+  .model-picker-option {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .model-picker-option-badge {
+    align-self: flex-start;
   }
 
   .message-row.visual-media-row {
