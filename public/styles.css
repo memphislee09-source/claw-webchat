@@ -517,6 +517,48 @@ button {
   border-color: transparent;
 }
 
+.send-button {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.send-button.stop-state {
+  background: linear-gradient(135deg, #f87171, #dc2626);
+}
+
+.send-button .button-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.send-button .button-icon path:first-child {
+  fill: currentColor;
+  stroke: none;
+}
+
+.send-button .button-icon path:last-child,
+.send-button.stop-state .button-icon circle {
+  fill: none;
+}
+
+.send-button.stop-state .button-icon rect {
+  fill: currentColor;
+  stroke: none;
+}
+
+.send-button.busy-state {
+  opacity: 0.72;
+}
+
 .primary-button:disabled,
 .ghost-button:disabled,
 .icon-button:disabled,

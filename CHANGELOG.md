@@ -9,17 +9,20 @@ The format is intentionally lightweight and follows a simple versioned release l
 ### Added
 - Add history search phase 2 first slice with date filters, `20 / 50 / 100` result limits, and stronger query matching for the current agent timeline
 - Add an agent-scoped `/model` picker modal that shows the current model plus available `provider/model` choices and switches the current upstream session directly
+- Add a session-scoped stop endpoint that aborts the current agent run through gateway `chat.abort`
 
 ### Changed
 - Improve search-result highlighting and search panel metadata so active date/limit filters stay visible
 - Change no-argument `/model` and `/models` from a plain text status reply into a model-switching modal workflow for the current agent
 - Keep the current conversation pinned to the bottom more reliably while the agent is still processing after a user send
+- Replace the composer text send button with an icon button that switches to a stop icon while the current agent is processing
 
 ### Fixed
 - Make gateway CLI parsing resilient when plugin diagnostics are printed before JSON output, restoring slash-command stability for `/model`, `/think`, and related upstream queries
 - Restore full local selftest coverage after `memory-lancedb-pro` installation by recording plugin install provenance in the local OpenClaw config
 - Keep message avatars visually aligned with the sidebar avatar size
 - Show a visible preview layer for videos before playback starts so users can identify the clip before pressing play
+- Prevent stopped runs from continuing through late-reply reconciliation or from slipping through after attachment preparation has already begun
 
 ## [0.1.4] - 2026-03-19
 

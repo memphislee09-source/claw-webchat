@@ -27,6 +27,7 @@ await checkSettings();
 await checkAgents();
 await checkAgentProfile();
 await checkOpenAgent();
+await checkStopEndpoint();
 await checkSlashCommands();
 await checkUpload();
 await checkAudioUpload();
@@ -58,6 +59,7 @@ async function checkPageShell() {
   assert(html.includes('id="mediaUploadInput"'), 'page should contain mediaUploadInput');
   assert(html.includes('id="newContextButton"'), 'page should contain slash trigger button');
   assert(html.includes('id="commandMenu"'), 'page should contain command menu');
+  assert(html.includes('class="primary-button send-button"'), 'page should contain icon-style send button');
   assert(html.includes('id="historySearchShell"'), 'page should contain persistent history search shell');
   assert(html.includes('id="historySearchPanel"'), 'page should contain history search panel');
   assert(html.includes('id="historySearchInput"'), 'page should contain history search input');
@@ -102,6 +104,8 @@ async function checkPageShell() {
   assert(appJs.includes('async function executeSlashCommand'), 'app.js should include slash command execution');
   assert(appJs.includes('async function openModelPicker'), 'app.js should include model picker loader');
   assert(appJs.includes('async function switchSessionModel'), 'app.js should include model switch handler');
+  assert(appJs.includes('async function stopActiveSessionReply'), 'app.js should include current reply stop handler');
+  assert(appJs.includes('function renderSendButtonState'), 'app.js should include send/stop button state renderer');
   assert(appJs.includes('function attachVideoPreview'), 'app.js should include video preview helper');
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
   assert(appJs.includes('function formatPresenceLabel'), 'app.js should include sidebar presence label formatting');
@@ -127,6 +131,7 @@ async function checkPageShell() {
   assert(css.includes('.model-picker'), 'styles.css should include model picker overlay styles');
   assert(css.includes('.model-picker-card'), 'styles.css should include model picker card styles');
   assert(css.includes('.model-picker-option'), 'styles.css should include model picker option styles');
+  assert(css.includes('.send-button.stop-state'), 'styles.css should include stop-state send button styles');
   assert(css.includes('.message-video-preview'), 'styles.css should include video preview overlay styles');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
   assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
@@ -272,6 +277,13 @@ async function checkOpenAgent() {
   assert(payload?.sessionKey === sessionKey, 'open should return expected sessionKey');
   assert(payload?.history && Array.isArray(payload.history.messages), 'open should return history page');
   assert(payload.history.messages.length <= 15, 'open should return the reduced initial history page');
+}
+
+async function checkStopEndpoint() {
+  const payload = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/stop`, {});
+  assert(payload?.ok === true, 'stop endpoint should return ok=true');
+  assert(typeof payload?.aborted === 'boolean', 'stop endpoint should expose aborted flag');
+  assert(Array.isArray(payload?.runIds), 'stop endpoint should expose runIds array');
 }
 
 async function checkSlashCommands() {

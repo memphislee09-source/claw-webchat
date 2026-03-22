@@ -65,6 +65,7 @@ const I18N = {
       attachMedia: '上传图片或音频',
       openSlashMenu: '打开 slash 命令菜单',
       send: '发送',
+      stopReply: '停止当前回复',
       workspaceSettings: 'Workspace Settings',
       settings: '设置',
       closeSettings: '关闭设置',
@@ -178,6 +179,9 @@ const I18N = {
       attachmentFailed: '附件处理失败：{error}',
       sendDone: '发送完成。',
       sendFailed: '发送失败：{error}',
+      stoppingReply: '正在停止当前回复…',
+      replyStopped: '已停止当前回复。',
+      replyStopFailed: '停止当前回复失败：{error}',
       uploadOnlyImageAudio: '仅支持图片或音频上传：{name}',
       noLocalCommands: '当前没有可用本地命令',
       executingCommand: '正在执行 {name}…',
@@ -285,6 +289,7 @@ const I18N = {
       attachMedia: 'Upload image or audio',
       openSlashMenu: 'Open slash command menu',
       send: 'Send',
+      stopReply: 'Stop current reply',
       workspaceSettings: 'Workspace Settings',
       settings: 'Settings',
       closeSettings: 'Close settings',
@@ -398,6 +403,9 @@ const I18N = {
       attachmentFailed: 'Attachment processing failed: {error}',
       sendDone: 'Message sent.',
       sendFailed: 'Send failed: {error}',
+      stoppingReply: 'Stopping the current reply…',
+      replyStopped: 'Stopped the current reply.',
+      replyStopFailed: 'Failed to stop the current reply: {error}',
       uploadOnlyImageAudio: 'Only image or audio uploads are supported: {name}',
       noLocalCommands: 'No local commands are currently available.',
       executingCommand: 'Running {name}…',
@@ -500,6 +508,8 @@ const state = {
   hasMore: false,
   loadingHistory: false,
   sendingSessionKeys: new Set(),
+  stoppingSessionKeys: new Set(),
+  stopRequestedSessionKeys: new Set(),
   pollingTimer: null,
   selectedOpenPromise: null,
   openRequestId: 0,
@@ -862,7 +872,6 @@ function renderLocalizedChrome() {
   const openSettingsLabel = t('ui.openSettings');
   const openSidebarLabel = t('ui.openSidebar');
   const searchLabel = t('ui.search');
-  const sendLabel = t('ui.send');
 
   closeSidebarButtonEl?.setAttribute('aria-label', closeSidebarLabel);
   refreshAgentsButtonEl?.setAttribute('aria-label', refreshLabel);
@@ -879,7 +888,7 @@ function renderLocalizedChrome() {
   attachButtonEl?.setAttribute('aria-label', t('ui.attachMedia'));
   attachButtonEl?.setAttribute('title', t('ui.attachMedia'));
   newContextButtonEl?.setAttribute('aria-label', t('ui.openSlashMenu'));
-  sendButtonEl.textContent = sendLabel;
+  renderSendButtonState();
   closeSettingsButtonEl?.setAttribute('aria-label', t('ui.closeSettings'));
   authPasswordInputEl?.setAttribute('placeholder', t('ui.enterPassword'));
   authLoginButtonEl.textContent = t('ui.enterWebChat');
@@ -989,6 +998,38 @@ async function loadSettings() {
   }
 
   populateSettingsForm();
+}
+
+function renderSendButtonState() {
+  if (!sendButtonEl) return;
+  const stopping = isActiveSessionStopping();
+  const busy = isActiveSessionBusy();
+  const stopMode = busy;
+  const label = stopMode ? t('ui.stopReply') : t('ui.send');
+
+  sendButtonEl.classList.toggle('stop-state', stopMode);
+  sendButtonEl.classList.toggle('busy-state', stopping);
+  sendButtonEl.setAttribute('aria-label', label);
+  sendButtonEl.setAttribute('title', label);
+  sendButtonEl.innerHTML = stopMode ? getStopButtonIconMarkup() : getSendButtonIconMarkup();
+}
+
+function getSendButtonIconMarkup() {
+  return `
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4.5 11.25L19.5 4.5L14.625 19.5L10.5 13.875L4.5 11.25Z"></path>
+      <path d="M10.5 13.875L19.5 4.5"></path>
+    </svg>
+  `;
+}
+
+function getStopButtonIconMarkup() {
+  return `
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="8.5"></circle>
+      <rect x="9" y="9" width="6" height="6" rx="1.6"></rect>
+    </svg>
+  `;
 }
 
 function normalizeThemeChoice(choice) {
@@ -1263,6 +1304,7 @@ async function refreshAgents({ autoOpen = false, refreshCurrent = false } = {}) 
   renderAgentList({ refreshIdentity: false });
   updateHeader();
   populateSettingsForm();
+  syncComposerInteractivity();
 
   const nextAgentId = previousActive && state.agents.some((item) => item.agentId === previousActive)
     ? previousActive
@@ -2341,11 +2383,18 @@ async function loadOlderHistory() {
 
 async function handleSendSubmit(event) {
   event.preventDefault();
-  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  if (!state.activeSessionKey) return;
+  if (isActiveSessionBusy()) {
+    if (!isActiveSessionStopping()) {
+      await stopActiveSessionReply();
+    }
+    return;
+  }
 
   const targetSessionKey = state.activeSessionKey;
   const targetAgentId = state.activeAgentId;
   const context = { agentId: targetAgentId, sessionKey: targetSessionKey };
+  state.stopRequestedSessionKeys.delete(targetSessionKey);
 
   const text = composerInputEl.value.trim();
   if (!text && !state.pendingUploads.length) return;
@@ -2366,7 +2415,14 @@ async function handleSendSubmit(event) {
 
   try {
     uploadedBlocks = await ensurePendingUploadsReady();
+    if (isSessionStopRequested(targetSessionKey)) {
+      state.stopRequestedSessionKeys.delete(targetSessionKey);
+      endSessionActivity(targetSessionKey);
+      showContextStatus(context, t('status.replyStopped'), 'success');
+      return;
+    }
   } catch (error) {
+    state.stopRequestedSessionKeys.delete(targetSessionKey);
     endSessionActivity(targetSessionKey);
     showContextStatus(context, t('status.attachmentFailed', { error: formatError(error) }), 'error');
     return;
@@ -2400,7 +2456,7 @@ async function handleSendSubmit(event) {
       renderMessages();
       maybeScrollMessagesToBottom();
     }
-    showContextStatus(context, t('status.sendDone'), 'success');
+    showContextStatus(context, response?.aborted ? t('status.replyStopped') : t('status.sendDone'), 'success');
     await refreshAgents({ autoOpen: false });
   } catch (error) {
     if (isOperationContextActive(context)) {
@@ -2413,11 +2469,38 @@ async function handleSendSubmit(event) {
     }
     showContextStatus(context, t('status.sendFailed', { error: formatError(error) }), 'error');
   } finally {
+    state.stopRequestedSessionKeys.delete(targetSessionKey);
     endSessionActivity(targetSessionKey);
     if (isOperationContextActive(context)) {
       renderMessages();
       maybeScrollMessagesToBottom();
     }
+  }
+}
+
+async function stopActiveSessionReply() {
+  const targetSessionKey = state.activeSessionKey;
+  if (!targetSessionKey || isActiveSessionStopping()) return;
+
+  const context = { agentId: state.activeAgentId, sessionKey: targetSessionKey };
+  state.stopRequestedSessionKeys.add(targetSessionKey);
+  state.stoppingSessionKeys.add(targetSessionKey);
+  syncComposerInteractivity();
+  showContextStatus(context, t('status.stoppingReply'), 'info');
+
+  try {
+    await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/stop`, {});
+    endSessionActivity(targetSessionKey);
+    setSessionPresenceLocally(targetSessionKey, 'idle');
+    renderMessages();
+    maybeScrollMessagesToBottom();
+    showContextStatus(context, t('status.replyStopped'), 'success');
+    await refreshAgents({ autoOpen: false });
+  } catch (error) {
+    showContextStatus(context, t('status.replyStopFailed', { error: formatError(error) }), 'error');
+  } finally {
+    state.stoppingSessionKeys.delete(targetSessionKey);
+    syncComposerInteractivity();
   }
 }
 
@@ -3985,6 +4068,14 @@ function getSendingStatusMessage() {
   return t('status.sendingAttachments');
 }
 
+function setSessionPresenceLocally(sessionKey, presence) {
+  const agent = state.agents.find((item) => item.sessionKey === sessionKey);
+  if (!agent) return;
+  agent.presence = presence;
+  renderAgentList({ refreshIdentity: false });
+  updateHeader();
+}
+
 function showContextStatus(context, message, tone = 'info') {
   if (!isOperationContextActive(context)) return;
   showStatus(message, tone);
@@ -4050,16 +4141,22 @@ function autoResizeComposer() {
 }
 
 function syncComposerInteractivity() {
-  setComposerEnabled(Boolean(state.activeSessionKey) && !isActiveSessionBusy() && (!state.authEnabled || state.authenticated));
+  setComposerEnabled({
+    canAccess: Boolean(state.activeSessionKey) && (!state.authEnabled || state.authenticated),
+    busy: isActiveSessionBusy(),
+    stopping: isActiveSessionStopping()
+  });
 }
 
-function setComposerEnabled(enabled) {
-  composerInputEl.disabled = !enabled;
-  sendButtonEl.disabled = !enabled;
-  newContextButtonEl.disabled = !enabled;
-  attachButtonEl.disabled = !enabled;
-  mediaUploadInputEl.disabled = !enabled;
-  if (!enabled) closeCommandMenu();
+function setComposerEnabled({ canAccess, busy, stopping }) {
+  const composerLocked = !canAccess || busy;
+  composerInputEl.disabled = composerLocked;
+  sendButtonEl.disabled = !canAccess || stopping;
+  newContextButtonEl.disabled = composerLocked;
+  attachButtonEl.disabled = composerLocked;
+  mediaUploadInputEl.disabled = composerLocked;
+  if (composerLocked) closeCommandMenu();
+  renderSendButtonState();
   renderPendingUploads();
 }
 
@@ -4081,11 +4178,31 @@ function endSessionActivity(sessionKey) {
 }
 
 function isSessionBusy(sessionKey) {
-  return Boolean(sessionKey) && state.sendingSessionKeys.has(sessionKey);
+  return Boolean(sessionKey) && (
+    state.sendingSessionKeys.has(sessionKey)
+    || hasRunningPresenceForSession(sessionKey)
+  );
+}
+
+function isSessionStopping(sessionKey) {
+  return Boolean(sessionKey) && state.stoppingSessionKeys.has(sessionKey);
+}
+
+function isSessionStopRequested(sessionKey) {
+  return Boolean(sessionKey) && state.stopRequestedSessionKeys.has(sessionKey);
 }
 
 function isActiveSessionBusy() {
   return isSessionBusy(state.activeSessionKey);
+}
+
+function isActiveSessionStopping() {
+  return isSessionStopping(state.activeSessionKey);
+}
+
+function hasRunningPresenceForSession(sessionKey) {
+  const agent = state.agents.find((item) => item.sessionKey === sessionKey);
+  return normalizePresence(agent?.presence || 'idle') === 'running';
 }
 
 function isOperationContextActive(context) {

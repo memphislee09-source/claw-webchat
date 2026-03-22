@@ -26,6 +26,7 @@ A standalone WebChat for OpenClaw with long-lived per-agent history, local media
 - Adds local slash command handling for common session and model operations
 - Lets `/model` open an agent-scoped picker that shows the current model and available `provider/model` targets
 - Adds date-filtered history search with stronger matching and larger result windows
+- Uses a send/stop dual-state composer button so the current agent task can be aborted directly from the input area
 
 ## Scope And Non-Goals
 `openclaw-webchat` is intentionally scoped as a focused companion UI for OpenClaw.
@@ -77,6 +78,7 @@ The settings UI now includes:
 - access mode switching between local-only and LAN / Tailscale-friendly binding
 - optional light authentication for shared LAN-style access
 - an agent-scoped `/model` picker that can switch the current upstream session model directly
+- a send icon in the composer that flips to a stop icon while the current agent is processing, and stops the current run when clicked
 - an About section with project summary and GitHub link
 - a Manual Start section with install, start, and restart command hints
 - a reminder when a service restart is required for access-mode changes
@@ -146,6 +148,7 @@ npm run selftest
 - Search within the current agent timeline with jump-to-hit and keyword highlight
 - History search phase 2 first slice with date filters, larger result sets, and stronger matching
 - Agent-scoped model picker for `/model` / `/models`, including current-model summary and direct model switching
+- Composer send/stop dual-state button wired to gateway `chat.abort` for the current agent session
 - Chat polish for consistent avatar sizing, steadier pinned-bottom behavior while agents are processing, and visible pre-play video previews
 - Responsive layout for desktop, tablet, and mobile drawer navigation
 - User and agent avatar/profile customization

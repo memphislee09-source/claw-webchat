@@ -48,6 +48,9 @@ const RESTART_LABEL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_LAUNC
   || 'ai.openclaw.webchat';
 const lateReplyReconciliations = new Set();
 const authSessions = new Map();
+const activeTurnControllers = new Map();
+const stoppedTurnStates = new Map();
+const ABORTED_ASSISTANT_REPLY = Symbol('openclaw-webchat-aborted-assistant-reply');
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -262,7 +265,26 @@ app.post('/api/openclaw-webchat/sessions/:sessionKey/send', async (req, res) => 
 
   try {
     const result = await runUserTurn(sessionBinding, { text, inputBlocks });
-    res.json({ ok: true, message: result.message });
+    res.json({ ok: true, message: result.message, aborted: result?.aborted === true });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: formatError(error) });
+  }
+});
+
+app.post('/api/openclaw-webchat/sessions/:sessionKey/stop', async (req, res) => {
+  const { sessionKey } = req.params;
+  const sessionBinding = getBindingBySessionKey(sessionKey);
+
+  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+
+  try {
+    const result = await stopUserTurn(sessionBinding);
+    res.json({
+      ok: true,
+      aborted: result.aborted,
+      runIds: result.runIds,
+      updatedAt: new Date().toISOString()
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: formatError(error) });
   }
@@ -597,6 +619,7 @@ async function runUserTurn(binding, { text, inputBlocks }) {
     upstreamSessionKey: latestBinding.upstreamSessionKey,
     upstreamGeneration: latestBinding.upstreamGeneration || null
   };
+  clearStoppedTurnState(binding.sessionKey, turnSnapshot.upstreamSessionKey);
 
   const userBlocks = [];
   if (text) userBlocks.push({ type: 'text', text });
@@ -616,6 +639,14 @@ async function runUserTurn(binding, { text, inputBlocks }) {
     updatedAt: new Date().toISOString()
   });
 
+  const turnController = new AbortController();
+  setActiveTurnController(binding.sessionKey, {
+    agentId: binding.agentId,
+    upstreamSessionKey: turnSnapshot.upstreamSessionKey,
+    controller: turnController,
+    startedAt: Date.now()
+  });
+
   try {
     await ensureBootstrapInjected(latestBinding);
 
@@ -633,8 +664,19 @@ async function runUserTurn(binding, { text, inputBlocks }) {
     const assistantRaw = await waitForAssistantReply(turnSnapshot.upstreamSessionKey, {
       minTimestampMs: startedAt,
       expectedUserText: upstreamMessage,
-      timeoutMs: ASSISTANT_WAIT_TIMEOUT_MS
+      timeoutMs: ASSISTANT_WAIT_TIMEOUT_MS,
+      signal: turnController.signal
     });
+
+    if (assistantRaw === ABORTED_ASSISTANT_REPLY || wasStoppedTurn(binding.sessionKey, turnSnapshot, startedAt)) {
+      if (isBindingTurnCurrent(binding.agentId, turnSnapshot)) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+      }
+      return { message: null, aborted: true };
+    }
 
     if (!isBindingTurnCurrent(binding.agentId, turnSnapshot)) {
       return {
@@ -650,6 +692,13 @@ async function runUserTurn(binding, { text, inputBlocks }) {
     }
 
     if (!assistantRaw) {
+      if (wasStoppedTurn(binding.sessionKey, turnSnapshot, startedAt)) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+        return { message: null, aborted: true };
+      }
       patchBinding(binding.agentId, {
         replyState: 'running',
         updatedAt: new Date().toISOString()
@@ -692,6 +741,8 @@ async function runUserTurn(binding, { text, inputBlocks }) {
       });
     }
     throw error;
+  } finally {
+    clearActiveTurnController(binding.sessionKey, turnController);
   }
 }
 
@@ -944,6 +995,14 @@ function scheduleLateAssistantReplyReconciliation(binding, { turnSnapshot, minTi
 
   void (async () => {
     try {
+      if (wasStoppedTurn(binding.sessionKey, turnSnapshot, minTimestampMs)) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+
       const assistantRaw = await waitForAssistantReply(turnSnapshot.upstreamSessionKey, {
         minTimestampMs,
         expectedUserText,
@@ -953,6 +1012,13 @@ function scheduleLateAssistantReplyReconciliation(binding, { turnSnapshot, minTi
       const latestBinding = getBinding(binding.agentId);
       const isCurrent = isBindingTurnCurrent(binding.agentId, turnSnapshot);
       if (!latestBinding || !isCurrent) return;
+      if (assistantRaw === ABORTED_ASSISTANT_REPLY || wasStoppedTurn(binding.sessionKey, turnSnapshot, minTimestampMs)) {
+        patchBinding(binding.agentId, {
+          replyState: 'idle',
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
 
       if (!assistantRaw) {
         patchBinding(binding.agentId, {
@@ -1439,12 +1505,74 @@ function buildUpstreamMessage(blocks) {
   ].filter(Boolean).join('\n');
 }
 
-async function waitForAssistantReply(sessionKey, { minTimestampMs, expectedUserText, timeoutMs }) {
+async function stopUserTurn(binding) {
+  const latestBinding = getBinding(binding.agentId) || binding;
+  const activeTurn = activeTurnControllers.get(binding.sessionKey);
+  const upstreamSessionKey = latestBinding.upstreamSessionKey;
+
+  if (activeTurn?.upstreamSessionKey === upstreamSessionKey) {
+    activeTurn.controller.abort();
+  }
+
+  markStoppedTurn(binding.sessionKey, upstreamSessionKey);
+
+  const response = await gatewayCall('chat.abort', { sessionKey: upstreamSessionKey });
+  patchBinding(binding.agentId, {
+    replyState: 'idle',
+    updatedAt: new Date().toISOString()
+  });
+
+  return {
+    aborted: Boolean(response?.aborted || activeTurn),
+    runIds: Array.isArray(response?.runIds) ? response.runIds : []
+  };
+}
+
+function setActiveTurnController(sessionKey, entry) {
+  if (!sessionKey || !entry?.controller) return;
+  activeTurnControllers.set(sessionKey, entry);
+}
+
+function clearActiveTurnController(sessionKey, controller) {
+  if (!sessionKey) return;
+  const active = activeTurnControllers.get(sessionKey);
+  if (!active) return;
+  if (controller && active.controller !== controller) return;
+  activeTurnControllers.delete(sessionKey);
+}
+
+function markStoppedTurn(sessionKey, upstreamSessionKey) {
+  if (!sessionKey || !upstreamSessionKey) return;
+  stoppedTurnStates.set(sessionKey, {
+    upstreamSessionKey,
+    stoppedAt: Date.now()
+  });
+}
+
+function clearStoppedTurnState(sessionKey, upstreamSessionKey) {
+  if (!sessionKey) return;
+  const entry = stoppedTurnStates.get(sessionKey);
+  if (!entry) return;
+  if (upstreamSessionKey && entry.upstreamSessionKey !== upstreamSessionKey) return;
+  stoppedTurnStates.delete(sessionKey);
+}
+
+function wasStoppedTurn(sessionKey, turnSnapshot, minTimestampMs = 0) {
+  if (!sessionKey) return false;
+  const entry = stoppedTurnStates.get(sessionKey);
+  if (!entry) return false;
+  if (entry.upstreamSessionKey !== turnSnapshot?.upstreamSessionKey) return false;
+  return Number(entry.stoppedAt || 0) >= Number(minTimestampMs || 0);
+}
+
+async function waitForAssistantReply(sessionKey, { minTimestampMs, expectedUserText, timeoutMs, signal } = {}) {
   const deadline = Date.now() + timeoutMs;
   const expected = canonicalizeText(expectedUserText);
 
   while (Date.now() < deadline) {
+    if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
     const history = await gatewayCall('chat.history', { sessionKey, limit: 120 });
+    if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
     const messages = Array.isArray(history?.messages) ? history.messages : [];
     const userIndex = findMatchingUserMessageIndex(messages, expected, minTimestampMs);
     const scanStart = userIndex >= 0 ? userIndex + 1 : 0;
@@ -1460,9 +1588,11 @@ async function waitForAssistantReply(sessionKey, { minTimestampMs, expectedUserT
       return message;
     }
 
+    if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
     await sleep(800);
   }
 
+  if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
   return null;
 }
 
