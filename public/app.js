@@ -171,6 +171,7 @@ const I18N = {
       transcriptStatus: '转写状态',
       transcriptFailedKeepAudio: '转写失败，已保留原始音频',
       videoLabel: '视频',
+      playVideo: '播放视频',
       videoLoadFailed: '视频加载失败',
       fileLabel: '文件',
       clickToOpenFile: '点击打开',
@@ -390,6 +391,7 @@ const I18N = {
       transcriptStatus: 'Transcript Status',
       transcriptFailedKeepAudio: 'Transcription failed. The original audio was kept.',
       videoLabel: 'Video',
+      playVideo: 'Play video',
       videoLoadFailed: 'Video failed to load',
       fileLabel: 'File',
       clickToOpenFile: 'Click to open',
@@ -1836,6 +1838,7 @@ function scrollToHistoryMessage(messageId) {
 }
 
 function renderMessages() {
+  const shouldStickToBottom = shouldKeepConversationPinnedAfterRender();
   messageListEl.classList.toggle('showing-history-target', Boolean(state.historySearchActiveMessageId));
   messageListEl.innerHTML = '';
 
@@ -1848,6 +1851,9 @@ function renderMessages() {
       <p class="empty-tip">${t('status.emptyTimelineTip')}</p>
     `;
     messageListEl.append(empty);
+    if (shouldStickToBottom) {
+      scheduleConversationPinnedBottomSync();
+    }
     return;
   }
 
@@ -1921,6 +1927,10 @@ function renderMessages() {
 
   if (isActiveSessionBusy()) {
     messageListEl.append(createAssistantProcessingRow());
+  }
+
+  if (shouldStickToBottom) {
+    scheduleConversationPinnedBottomSync();
   }
 }
 
@@ -2065,11 +2075,13 @@ function renderMediaBlock(block, bubble = null) {
     video.className = 'message-video';
     video.controls = true;
     video.preload = 'metadata';
+    video.playsInline = true;
     video.src = block.url;
     keepMessagesPinnedOnMediaLoad(video, 'loadedmetadata');
     bindVisualMediaWidth(bubble, wrapper, video, 'loadedmetadata');
     video.addEventListener('error', () => wrapper.replaceWith(createInvalidMediaCard(block.name || t('status.videoLabel'), t('status.videoLoadFailed'))));
     wrapper.append(video);
+    attachVideoPreview(wrapper, video, block);
     return wrapper;
   }
 
@@ -2143,6 +2155,107 @@ function createInvalidMediaCard(titleText, reasonText) {
 
   invalid.append(title, reason);
   return invalid;
+}
+
+function attachVideoPreview(wrapper, video, block) {
+  if (!wrapper || !video) return;
+
+  const previewButton = document.createElement('button');
+  previewButton.type = 'button';
+  previewButton.className = 'message-video-preview';
+  previewButton.setAttribute('aria-label', `${t('status.playVideo')} ${block?.name || t('status.videoLabel')}`.trim());
+
+  const previewImage = document.createElement('img');
+  previewImage.className = 'message-video-preview-image';
+  previewImage.alt = block?.name || t('status.videoLabel');
+  previewImage.hidden = true;
+
+  const previewOverlay = document.createElement('div');
+  previewOverlay.className = 'message-video-preview-overlay';
+
+  const previewMeta = document.createElement('div');
+  previewMeta.className = 'message-video-preview-meta';
+
+  const previewTitle = document.createElement('div');
+  previewTitle.className = 'message-video-preview-title';
+  previewTitle.textContent = block?.name || t('status.videoLabel');
+
+  const previewAction = document.createElement('div');
+  previewAction.className = 'message-video-preview-action';
+  previewAction.textContent = t('status.playVideo');
+
+  previewMeta.append(previewTitle, previewAction);
+  previewButton.append(previewImage, previewOverlay, previewMeta);
+  wrapper.append(previewButton);
+
+  let dismissed = false;
+  let previewReady = false;
+
+  const hidePreview = () => {
+    dismissed = true;
+    wrapper.classList.add('preview-dismissed');
+  };
+
+  const showPreview = () => {
+    if (dismissed) return;
+    wrapper.classList.remove('preview-dismissed');
+  };
+
+  previewButton.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    hidePreview();
+    try {
+      await video.play();
+    } catch {
+      dismissed = false;
+      showPreview();
+    }
+  });
+
+  video.addEventListener('play', hidePreview);
+  video.addEventListener('seeking', () => {
+    if (!dismissed && video.currentTime > 0.01) hidePreview();
+  });
+
+  const applyPreviewFrame = () => {
+    if (previewReady) return;
+    const snapshot = captureVideoFrameDataUrl(video);
+    if (!snapshot) return;
+    previewReady = true;
+    previewImage.src = snapshot;
+    previewImage.hidden = false;
+    wrapper.classList.add('has-preview-image');
+    showPreview();
+  };
+
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    requestAnimationFrame(applyPreviewFrame);
+  } else {
+    video.addEventListener('loadeddata', applyPreviewFrame, { once: true });
+  }
+}
+
+function captureVideoFrameDataUrl(video) {
+  const width = Number(video?.videoWidth) || 0;
+  const height = Number(video?.videoHeight) || 0;
+  if (!width || !height) return null;
+
+  const maxEdge = 960;
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+
+  try {
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } catch {
+    return null;
+  }
 }
 
 function bindVisualMediaWidth(bubble, wrapper, mediaElement, eventName) {
@@ -3900,6 +4013,22 @@ function scrollMessagesToBottom() {
 function maybeScrollMessagesToBottom(force = false) {
   if (!force && !state.autoScrollPinned) return;
   scrollMessagesToBottom();
+}
+
+function shouldKeepConversationPinnedAfterRender() {
+  if (state.historySearchActiveMessageId) return false;
+  return state.autoScrollPinned || isActiveSessionBusy();
+}
+
+function scheduleConversationPinnedBottomSync() {
+  requestAnimationFrame(() => {
+    if (!shouldKeepConversationPinnedAfterRender()) return;
+    scrollMessagesToBottom();
+    requestAnimationFrame(() => {
+      if (!shouldKeepConversationPinnedAfterRender()) return;
+      scrollMessagesToBottom();
+    });
+  });
 }
 
 function keepMessagesPinnedOnMediaLoad(element, eventName) {

@@ -13,10 +13,13 @@ The format is intentionally lightweight and follows a simple versioned release l
 ### Changed
 - Improve search-result highlighting and search panel metadata so active date/limit filters stay visible
 - Change no-argument `/model` and `/models` from a plain text status reply into a model-switching modal workflow for the current agent
+- Keep the current conversation pinned to the bottom more reliably while the agent is still processing after a user send
 
 ### Fixed
 - Make gateway CLI parsing resilient when plugin diagnostics are printed before JSON output, restoring slash-command stability for `/model`, `/think`, and related upstream queries
 - Restore full local selftest coverage after `memory-lancedb-pro` installation by recording plugin install provenance in the local OpenClaw config
+- Keep message avatars visually aligned with the sidebar avatar size
+- Show a visible preview layer for videos before playback starts so users can identify the clip before pressing play
 
 ## [0.1.4] - 2026-03-19
 

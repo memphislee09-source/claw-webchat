@@ -46,6 +46,9 @@
   --danger-soft-bg: rgba(239, 68, 68, 0.08);
   --danger-text: #fecaca;
   --audio-pill-text: #d1fae5;
+  --agent-avatar-size: 48px;
+  --agent-avatar-radius: 16px;
+  --agent-avatar-font-size: 18px;
   font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
 }
 
@@ -350,7 +353,7 @@ button {
   padding: 12px;
   color: inherit;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: var(--agent-avatar-size) minmax(0, 1fr) auto;
   grid-template-rows: auto auto;
   gap: 4px 10px;
   text-align: left;
@@ -376,12 +379,13 @@ button {
 
 .agent-avatar {
   grid-row: 1 / span 2;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
+  width: var(--agent-avatar-size);
+  height: var(--agent-avatar-size);
+  border-radius: var(--agent-avatar-radius);
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.8), rgba(99, 102, 241, 0.8));
   font-weight: 700;
-  font-size: 18px;
+  font-size: var(--agent-avatar-font-size);
+  flex: 0 0 var(--agent-avatar-size);
 }
 
 .agent-avatar img,
@@ -854,15 +858,18 @@ button {
 }
 
 .message-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
+  width: var(--agent-avatar-size);
+  height: var(--agent-avatar-size);
+  min-width: var(--agent-avatar-size);
+  min-height: var(--agent-avatar-size);
+  border-radius: var(--agent-avatar-radius);
   display: grid;
   place-items: center;
   overflow: hidden;
-  font-size: 18px;
+  font-size: var(--agent-avatar-font-size);
   font-weight: 700;
   border: 1px solid var(--line);
+  flex: 0 0 var(--agent-avatar-size);
 }
 
 .message-avatar.assistant {
@@ -1042,6 +1049,13 @@ button {
   background: transparent;
 }
 
+.message-video-shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--surface-1);
+}
+
 .message-image,
 .message-video {
   display: block;
@@ -1056,6 +1070,94 @@ button {
 
 .message-image-button {
   cursor: zoom-in;
+}
+
+.message-video-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  padding: 0;
+  background:
+    linear-gradient(180deg, rgba(7, 10, 20, 0.08), rgba(7, 10, 20, 0.48)),
+    linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(15, 23, 42, 0.24));
+  color: inherit;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.message-video-preview-image,
+.message-video-preview-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.message-video-preview-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--surface-1);
+}
+
+.message-video-preview-overlay {
+  background:
+    linear-gradient(180deg, rgba(7, 10, 20, 0.08), rgba(7, 10, 20, 0.58)),
+    radial-gradient(circle at center, rgba(7, 10, 20, 0.02), rgba(7, 10, 20, 0.26));
+}
+
+.message-video-preview-meta {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+
+.message-video-preview-title,
+.message-video-preview-action {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 7px 12px;
+  backdrop-filter: blur(8px);
+}
+
+.message-video-preview-title {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #f8fafc;
+  background: rgba(7, 10, 20, 0.54);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-video-preview-action {
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f8fafc;
+  background: rgba(37, 99, 235, 0.72);
+}
+
+.message-video-preview-action::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 10px solid currentColor;
+}
+
+.message-video-shell.preview-dismissed .message-video-preview {
+  display: none;
 }
 
 .message-bubble.visual-media-bubble .message-image-button,
@@ -2265,7 +2367,7 @@ button {
   }
 
   .agent-card {
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: var(--agent-avatar-size) minmax(0, 1fr);
   }
 
   .agent-meta {

@@ -102,6 +102,7 @@ async function checkPageShell() {
   assert(appJs.includes('async function executeSlashCommand'), 'app.js should include slash command execution');
   assert(appJs.includes('async function openModelPicker'), 'app.js should include model picker loader');
   assert(appJs.includes('async function switchSessionModel'), 'app.js should include model switch handler');
+  assert(appJs.includes('function attachVideoPreview'), 'app.js should include video preview helper');
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
   assert(appJs.includes('function formatPresenceLabel'), 'app.js should include sidebar presence label formatting');
   assert(appJs.includes('function renderMarkdownBlock'), 'app.js should include markdown bubble rendering');
@@ -126,6 +127,7 @@ async function checkPageShell() {
   assert(css.includes('.model-picker'), 'styles.css should include model picker overlay styles');
   assert(css.includes('.model-picker-card'), 'styles.css should include model picker card styles');
   assert(css.includes('.model-picker-option'), 'styles.css should include model picker option styles');
+  assert(css.includes('.message-video-preview'), 'styles.css should include video preview overlay styles');
   assert(css.includes('.markdown-content'), 'styles.css should include markdown content styles');
   assert(css.includes('.message-bubble.visual-media-bubble'), 'styles.css should include equal-width visual media bubble styles');
   assert(css.includes('.message-list > :first-child'), 'styles.css should use first-child auto margin for bottom anchoring');

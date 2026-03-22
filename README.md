@@ -146,6 +146,7 @@ npm run selftest
 - Search within the current agent timeline with jump-to-hit and keyword highlight
 - History search phase 2 first slice with date filters, larger result sets, and stronger matching
 - Agent-scoped model picker for `/model` / `/models`, including current-model summary and direct model switching
+- Chat polish for consistent avatar sizing, steadier pinned-bottom behavior while agents are processing, and visible pre-play video previews
 - Responsive layout for desktop, tablet, and mobile drawer navigation
 - User and agent avatar/profile customization
 - Theme presets and lighter chat-bubble visual treatment
