@@ -22,14 +22,10 @@ A standalone WebChat for agent workflows on top of an existing OpenClaw runtime,
 - Add date-filtered history search with stronger matching and larger result windows
 - Use a send/stop dual-state composer button so the current agent task can be aborted directly from the input area
 
-## Screenshots
-![Main UI](docs/images/main-ui.png)
-
-![Model Picker](docs/images/model-picker.png)
-
-![History Search](docs/images/history-search.png)
-
-![Settings](docs/images/settings.png)
+## Demo Video
+- GitHub repository pages open this local MP4 as a player/download target when clicked.
+- Play from the repository: [docs/media/claw-webchat-promo-v4.mp4](docs/media/claw-webchat-promo-v4.mp4)
+- Download the current promo video: [claw-webchat-promo-v4.mp4](docs/media/claw-webchat-promo-v4.mp4)
 
 ## Installation Options
 

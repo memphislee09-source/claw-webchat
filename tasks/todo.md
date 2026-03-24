@@ -44,6 +44,14 @@
 - [x] Verify the release bundle archive and checksum contents
 - [x] Create the first GitHub Release with downloadable bundle assets
 - [x] Record the release result and sync it to GitHub
+- [x] Re-time the promo video so the history/search narration stays on the history/search visuals
+- [x] Replace the rich-media scene's old model-picker screenshot with `08-markdown.png`
+- [x] Regenerate the promo voiceover with the updated `Markdown文件` narration
+- [x] Re-render and verify the corrected promo video output
+- [x] Restore the missing closing CTA narration and add a matching outro scene
+- [x] Re-render and verify the final seconds of the promo video after the CTA restore
+- [x] Replace the README screenshot section with the new promo video entry
+- [x] Verify the README now points to the tracked promo video artifact instead of static screenshots
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -203,3 +211,38 @@
     `https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.tar.gz`
   - Checksum download URL:
     `https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.sha256`
+- Promo video v3 follow-up:
+  - Re-generated the voiceover as per-scene `scenes-v4` clips so each visual section now tracks its own
+    narration instead of relying on one long track with hand-estimated cut points.
+  - Updated the rich-media section to use `08-markdown.png` and changed the media copy from `文件` to
+    `Markdown文件`.
+  - Tightened the full composition from `1309` frames to `1019` frames and looped the background bed so the
+    shorter new narration still ends cleanly.
+  - Re-rendered the promo video as `media/video/remotion-promo/out/claw-webchat-promo-v3.mp4` and
+    concatenated the new voice track as `media/audio/claw-webchat-promo-zh-v3.mp3`.
+  - Verification passed:
+    `ffprobe` confirms `1920x1080`, duration `34.026667s`, size about `7.8MB`.
+  - Visual spot checks passed:
+    `20s` frame stays on the history/search scene, `23s` frame enters rich-media, and `29s` frame shows the
+    model + Think controls scene.
+- Promo video v4 CTA restore:
+  - Split the old final control narration into a dedicated control clip and a dedicated CTA clip, then
+    reintroduced `OutroScene` as the final sequence so the last line has its own visual landing page.
+  - Moved all promo audio references to `scenes-v5`, keeping scenes `01-05` unchanged and regenerating
+    only scenes `06-07` for the fixed ending.
+  - Re-rendered the promo video as `media/video/remotion-promo/out/claw-webchat-promo-v4.mp4` and
+    concatenated the new voice track as `media/audio/claw-webchat-promo-zh-v4.mp3`.
+  - Verification passed:
+    `ffprobe` confirms `1920x1080`, duration `39.914667s`, size about `8.6MB`.
+  - Tail-frame spot checks passed:
+    `34s`, `37s`, and `39s` all land on the dedicated CTA outro instead of the preceding control scene.
+- README demo-video swap:
+  - Replaced the old four-image `Screenshots` section in `README.md` with a `Demo Video` section that
+    points directly at the tracked promo video artifact.
+  - Added `docs/media/claw-webchat-promo-v4.mp4` as the repository-stable path for the current promo cut.
+  - Verification passed:
+    `README.md` no longer references `docs/images/main-ui.png`, `docs/images/model-picker.png`,
+    `docs/images/history-search.png`, or `docs/images/settings.png`.
+  - Artifact verification passed:
+    `ffprobe` confirms `docs/media/claw-webchat-promo-v4.mp4` is `1920x1080`, duration `39.914667s`,
+    size about `9.0MB`.
