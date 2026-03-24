@@ -14,6 +14,8 @@
 - [x] Investigate why wangyuyan news-brief images appear shrunken in Claw WebChat
 - [x] Create experimental branch for desktop media default max-width = 70vw
 - [x] Verify and hand off the 70vw desktop media experiment branch
+- [x] Revert the mixed-media bubble experiment back to the previous 70vw-only branch state
+- [ ] Re-verify and restart the service for user testing
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -61,3 +63,8 @@
     `min(420px, 100%)` to `min(70vw, 100%)` for visual comparison, without changing the
     `visual-media-bubble` decision logic.
   - Verification passed: `npm run check`.
+- Mixed-media bubble rollback:
+  - The follow-up experiment that forced all text+media messages into visual-media bubbles was
+    reverted at the user's request.
+  - The branch is now back to the previous experiment state: keep the desktop/default `70vw`
+    media cap experiment, but preserve the original mixed-media bubble gating behavior.
