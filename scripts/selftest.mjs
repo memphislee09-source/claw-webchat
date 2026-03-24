@@ -113,7 +113,6 @@ async function checkPageShell() {
   assert(appJs.includes('function formatPresenceLabel'), 'app.js should include sidebar presence label formatting');
   assert(appJs.includes('function renderMarkdownBlock'), 'app.js should include markdown bubble rendering');
   assert(appJs.includes("bubble.classList.add('visual-media-bubble')"), 'app.js should include responsive visual media bubble branch');
-  assert(appJs.includes('return visualMediaCount > 0;'), 'app.js should keep visual media bubbles enabled for all image/video mixed messages');
   assert(appJs.includes('groupMessageBlocksForRender'), 'app.js should include shared block render grouping');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');

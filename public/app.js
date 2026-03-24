@@ -2347,7 +2347,16 @@ function syncVisualBubbleWidth(bubble) {
 function shouldUseVisualMediaBubble(blocks) {
   const normalizedBlocks = Array.isArray(blocks) ? blocks : [];
   const visualMediaCount = normalizedBlocks.filter((block) => block?.type === 'image' || block?.type === 'video').length;
-  return visualMediaCount > 0;
+  if (!visualMediaCount) return false;
+
+  const totalTextLength = normalizedBlocks.reduce((sum, block) => {
+    if (block?.type !== 'text') return sum;
+    return sum + String(block.text || '').trim().length;
+  }, 0);
+
+  if (totalTextLength === 0) return true;
+
+  return totalTextLength <= 220;
 }
 
 async function loadOlderHistory() {

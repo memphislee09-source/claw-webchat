@@ -14,8 +14,6 @@
 - [x] Investigate why wangyuyan news-brief images appear shrunken in Claw WebChat
 - [x] Create experimental branch for desktop media default max-width = 70vw
 - [x] Verify and hand off the 70vw desktop media experiment branch
-- [x] Apply visual-media-bubble behavior to all mixed text/image or text/video messages
-- [x] Verify mixed-media bubble change with `npm run check` and `npm run selftest`
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -63,10 +61,3 @@
     `min(420px, 100%)` to `min(70vw, 100%)` for visual comparison, without changing the
     `visual-media-bubble` decision logic.
   - Verification passed: `npm run check`.
-- Mixed-media bubble follow-up:
-  - Removed the old `totalTextLength <= 220` gate from `shouldUseVisualMediaBubble(...)`, so any
-    message containing image/video now uses the same equal-width visual-media bubble behavior even
-    when the text body is long.
-  - This keeps images flush with the bubble width, avoids side whitespace, and still relies on the
-    measured media width so small images are not force-enlarged.
-  - Verification passed: `npm run check`, `npm run selftest`.
