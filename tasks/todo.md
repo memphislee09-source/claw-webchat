@@ -57,6 +57,9 @@
 - [x] Rework the public README homepage into a bilingual landing page
 - [x] Add one-click language switch links for Chinese and English on the GitHub repo homepage
 - [x] Push the bilingual README update to GitHub and verify the new mainline commit
+- [x] Create a `tools/` documentation folder for reusable tool-operation guides
+- [x] Document the full narrated promo-video workflow for future reuse
+- [ ] Verify and sync the new tools docs to GitHub
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -265,3 +268,13 @@
   - Mirrored the public-facing project overview, installation paths, quick start, capability summary,
     security notes, and docs navigation in both Chinese and English.
   - Synced to GitHub on `main` with commit `6ec7c14` (`docs: add bilingual repo homepage`).
+- Tools docs follow-up:
+  - Added `tools/README.md` as the entry point for reusable tool-operation guides.
+  - Added `tools/VIDEO_PROMO_WORKFLOW.md` to capture the full narrated promo-video workflow, including
+    script prep, screenshot collection, SiliconFlow CosyVoice scene-based TTS, Remotion rendering,
+    FFmpeg verification, and GitHub README embedding.
+  - Verified the documented reference paths exist for the current project state:
+    `docs/media/claw-webchat-promo-v4.mp4`,
+    `media/video/remotion-promo/src/PromoVideo.tsx`,
+    `media/video/remotion-promo/src/Root.tsx`,
+    and `media/video/source-shots/`.
