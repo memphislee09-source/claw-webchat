@@ -20,6 +20,9 @@
 - [x] Fix the right-side message pane scroll jumping behavior
 - [x] Update docs for the scroll fix and current branch state
 - [x] Commit and push the branch updates to GitHub
+- [x] Merge `codex/desktop-media-70vw` back into `main`
+- [x] Update docs so `main` becomes the new development baseline
+- [x] Verify merged `main` and sync it to GitHub
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -97,3 +100,8 @@
     auto-pin condition, and the direct scroll behavior.
   - Verification passed: `npm run check`, `npm run selftest`, LaunchAgent restart, and
     `http://127.0.0.1:3770/healthz`.
+- Mainline merge follow-up:
+  - Fast-forward merged `codex/desktop-media-70vw` into `main`, so the `70vw` desktop media cap
+    change and the right-side scroll stabilization are now the official development baseline.
+  - Updated `CHANGELOG.md`, `status.md`, and `docs/HANDOFF-2026-03-24.md` to remove the old
+    “experimental branch only” wording and mark `main` as the branch to continue from.

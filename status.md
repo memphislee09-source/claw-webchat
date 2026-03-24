@@ -52,6 +52,8 @@
   - 图片查看器右上角缩放读数会跟随真实缩放比例动态刷新，不再固定显示 `1:1`
   - 前端与公开展示文档中的项目名已统一改为 `Claw WebChat`；API、环境变量、namespace 和仓库名保持不变
   - 隐藏 bootstrap 媒体约定已收紧并压缩：agent 默认会把本地媒体和直链远程 `http/https` 媒体按 `MEDIA:` / `mediaUrl:` 回传到 Claw WebChat，不再误走不受支持的 `message` / `webchat` 发送路径
+  - 常规桌面图片 / 视频消息默认宽度上限已从 `420px` 调整为 `70vw`，同时保留原有图文混排等宽气泡判定逻辑
+  - 右侧消息区滚动已补稳：历史补页保持原可见区，agent 处理中不再强制把用户拉回底部，消息列表改为直接滚动避免动画叠加乱跳
   - 已补公开发布资料第一套：README 首页重写、公开发布 checklist、GitHub issue/PR 模板增强、截图归档与两套 agent 安装指南
   - 已新增 release bundle 打包脚本，可生成 GitHub Release 用的整合安装包与 SHA256 校验文件
   - 本地 `selftest` 已恢复通过；旧的 `claw-webchat:*` sessionKey 绑定会在服务端自动迁移并继续兼容
@@ -87,6 +89,8 @@
 - 图片查看器全屏模式已支持随真实缩放动态更新右上角读数
 - 公开发布准备资料已落地：截图、README 首页、issue/PR 模板、bundle / network 两套 agent 安装说明
 - 隐藏 bootstrap 已明确约定本地文件与远程直链媒体的回传格式，agent 在 Claw WebChat 中无需额外提醒即可按 `MEDIA:` / `mediaUrl:` 正确发送
+- 常规桌面媒体默认上限已提升到 `70vw`
+- 右侧消息区历史补页与手动滚动已补稳，不再因 busy 贴底或平滑滚动叠加而频繁乱跳
 
 ## 关键文件
 - `src/server.js`：服务端适配层、历史存储、媒体代理、设置接口、slash 命令
@@ -97,25 +101,27 @@
 - `docs/HANDOFF-2026-03-24.md`：当前交接摘要
 
 ## 最近主线变更
-- `0.1.5` 已收口并准备同步到 GitHub：历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布文档与图片查看器缩放读数修复均已纳入当前版本
+- `main` 当前已前进到 `f81d81c`：在保留既有图文混排保护逻辑的前提下，将常规桌面媒体默认上限提升到 `70vw`，并修复右侧消息区滚动乱跳
+- `0.1.5` 已收口并同步到 GitHub：历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布文档与图片查看器缩放读数修复均已纳入当前版本
 - `f27a1d4` `feat: add theme preset variants`
 - `dcfbe64` `feat: add light theme toggle`
 - `932bdcd` `docs: record avatar persistence fix`
 
 ## 分支状态
 - 当前开发基点：`main`
-- 已合流分支：`codex/mobile-history-test`
+- 已合流分支：
+  - `codex/mobile-history-test`
+  - `codex/desktop-media-70vw`
 - 仍保留的历史实验分支：
   - `codex/image-bubble-width-experiment`
   - `codex/mobile-history-test`
-  - `codex/desktop-media-70vw`
 
 ## 已知重点
 - 2026-03-24 `0.1.5` 已将历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布准备资料和图片查看器缩放读数修复一起并入 `main`
 - 2026-03-24 已修复 `sessionKey` 前缀不一致：服务端会把历史 `claw-webchat:*` 绑定自动规范到 `openclaw-webchat:*`，并继续兼容旧 key 请求
 - 2026-03-24 已完成显示层品牌改名：用户可见项目名统一为 `Claw WebChat`，但后端技术标识仍保持 `openclaw-webchat`
 - 2026-03-24 已修复 Athena 发图时误走 `message` 工具的问题：隐藏 bootstrap 现在更短但更明确，agent 默认知道用 `MEDIA:` / `mediaUrl:` 回传本地媒体与远程直链媒体
-- 2026-03-24 分支 `codex/desktop-media-70vw` 已收口两项实验内修复：常规桌面媒体默认上限调整为 `70vw`，以及右侧消息区滚动乱跳修复；当前用户已完成一轮主观验收，是否并回 `main` 仍待后续决定
+- 2026-03-24 常规桌面媒体默认上限调整为 `70vw`，以及右侧消息区滚动乱跳修复，现已并入 `main`，后续继续以当前主线为开发基点
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题
 - 2026-03-22 已补上当前 agent 级模型切换弹窗：无参 `/model` / `/models` 会弹出可用模型列表，点击后直接切换当前 agent 的上游 session 模型
