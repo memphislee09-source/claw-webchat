@@ -11,6 +11,7 @@
 - 当前主线：`main`
 - 仓库地址：`https://github.com/memphislee09-source/openclaw-webchat`
 - 项目目标：构建独立于默认 WebUI 的 OpenClaw WebChat，强化历史保留、富媒体体验和多会话稳定性
+- 当前品牌显示：面向用户与公开页面统一显示为 `Claw WebChat`；后端技术标识仍保持 `openclaw-webchat`
 
 ## 当前基线
 - `0.1.5` 已合入 `main`，后续统一以主线为开发基点
@@ -49,6 +50,7 @@
   - 输入框“发送”已改为图标按钮；当前 agent 处理中时会切换为停止图标，可直接停止该 agent 当前任务
   - session 级停止接口已接入 gateway `chat.abort`，并同步拦截本地等待态与迟到补回链路
   - 图片查看器右上角缩放读数会跟随真实缩放比例动态刷新，不再固定显示 `1:1`
+  - 前端与公开展示文档中的项目名已统一改为 `Claw WebChat`；API、环境变量、namespace 和仓库名保持不变
   - 已补公开发布资料第一套：README 首页重写、公开发布 checklist、GitHub issue/PR 模板增强、截图归档与两套 agent 安装指南
   - 已新增 release bundle 打包脚本，可生成 GitHub Release 用的整合安装包与 SHA256 校验文件
   - 本地 `selftest` 已恢复通过；旧的 `claw-webchat:*` sessionKey 绑定会在服务端自动迁移并继续兼容
@@ -108,6 +110,7 @@
 ## 已知重点
 - 2026-03-24 `0.1.5` 已将历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布准备资料和图片查看器缩放读数修复一起并入 `main`
 - 2026-03-24 已修复 `sessionKey` 前缀不一致：服务端会把历史 `claw-webchat:*` 绑定自动规范到 `openclaw-webchat:*`，并继续兼容旧 key 请求
+- 2026-03-24 已完成显示层品牌改名：用户可见项目名统一为 `Claw WebChat`，但后端技术标识仍保持 `openclaw-webchat`
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题
 - 2026-03-22 已补上当前 agent 级模型切换弹窗：无参 `/model` / `/models` 会弹出可用模型列表，点击后直接切换当前 agent 的上游 session 模型

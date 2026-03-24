@@ -11,7 +11,7 @@ Security fixes are currently expected on the latest `0.1.x` mainline.
 
 ## Deployment Assumptions
 
-`openclaw-webchat` is currently intended for:
+Claw WebChat is currently intended for:
 - local machine usage
 - trusted private network usage
 - Tailscale or equivalent controlled access

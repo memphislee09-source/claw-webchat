@@ -1,15 +1,15 @@
-# openclaw-webchat
+# Claw WebChat
 
-A standalone WebChat for OpenClaw with long-lived per-agent history, local media handling, and a lightweight server adapter.
+A standalone WebChat for agent workflows on top of an existing OpenClaw runtime, with long-lived per-agent history, local media handling, and a lightweight server adapter.
 
-`openclaw-webchat` 是一个独立于 OpenClaw 默认 WebUI 的 WebChat 项目，目标是在不深度耦合官方前端实现的前提下，提供更稳定的历史保留、富媒体体验和多会话隔离能力。
+`Claw WebChat` 是一个独立于 OpenClaw 默认 WebUI 的 WebChat 项目，目标是在不深度耦合官方前端实现的前提下，提供更稳定的历史保留、富媒体体验和多会话隔离能力。
 
 ## At A Glance
 - Current version: `0.1.5`
 - Stability: `alpha`, but already usable for local-first personal workflows
 - Default branch: `main`
 - Recommended deployment: local machine or private network behind Tailscale / equivalent access control
-- Best fit: people who want a dedicated OpenClaw chat surface with long-lived history, media support, and per-agent isolation
+- Best fit: people who want a dedicated Claw WebChat surface with long-lived history, media support, and per-agent isolation
 
 ## Why This Exists
 - Keep a long-lived timeline for each OpenClaw agent inside the `openclaw-webchat` namespace

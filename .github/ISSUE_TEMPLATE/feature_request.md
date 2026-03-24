@@ -20,7 +20,7 @@ Who benefits from this, and what becomes easier or safer for them?
 
 ## Why It Fits This Project
 
-Explain why this belongs in `openclaw-webchat` instead of an external tool, a separate integration, or the upstream OpenClaw UI.
+Explain why this belongs in Claw WebChat instead of an external tool, a separate integration, or the upstream OpenClaw UI.
 
 ## Current Workaround
 

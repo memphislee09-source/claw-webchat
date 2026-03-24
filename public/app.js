@@ -1,5 +1,6 @@
 import { groupMessageBlocksForRender } from './message-blocks.js';
 
+const BRAND_NAME = 'Claw WebChat';
 const THEME_STORAGE_KEY = 'openclaw-webchat-theme-choice';
 const LEGACY_THEME_MODE_STORAGE_KEY = 'openclaw-webchat-theme-mode';
 const LANGUAGE_STORAGE_KEY = 'openclaw-webchat-language';
@@ -124,12 +125,12 @@ const I18N = {
       accessIntro: '这里管理本机 / 局域网访问方式，以及局域网模式下可选的轻认证。Tailscale 访问沿用同一服务地址，只需要保证你的 Tailnet 已能访问当前主机。',
       accessMode: '访问方式',
       documentAccessTitle: '文档访问范围',
-      aboutTitle: '关于 openclaw-webchat',
+      aboutTitle: '关于 Claw WebChat',
       shareRepoHint: '如果你在社区里分享这个项目，优先把这里的仓库链接发出去即可。',
       selfManageTitle: '手动启动服务',
       authGateCopy: '当前实例已开启轻认证。输入访问口令后继续使用 WebChat。'
       ,
-      projectSummary: '一个面向个人使用的 OpenClaw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
+      projectSummary: '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
       modelPickerIntro: '下面列出当前可用模型，选择后会直接切换这个 agent 的上游会话模型。',
       modelPickerCurrentMissing: '当前模型未出现在可用列表里，你仍然可以从下面选择新模型。'
     },
@@ -228,7 +229,7 @@ const I18N = {
       restartHintManual: '当前环境不支持从设置页自动重启。监听地址切换必须手动重启；访问口令开关和口令修改可即时生效。',
       manualStartIntroSupported: '如果你需要手动启动或恢复服务，可以按下面的步骤操作；已注册 LaunchAgent 时也可以直接执行重启命令。',
       manualStartIntro: '如果你需要手动启动或恢复服务，可以按下面的步骤操作。',
-      manualRestartFallback: '如果你使用自己的进程管理器，请按当前方式重启 openclaw-webchat。',
+      manualRestartFallback: '如果你使用自己的进程管理器，请按当前方式重启 Claw WebChat。',
       selfSubtitle: '用户自己',
       syncUserAvatar: '会同步到消息区里“我”的头像与名称',
       syncAgentAvatar: '会同步到 {agent} 的左栏、顶部标题和消息头像',
@@ -348,12 +349,12 @@ const I18N = {
       accessIntro: 'Manage local / LAN access modes here, along with optional light authentication for LAN-style access. Tailscale uses the same service address as long as your Tailnet can already reach this host.',
       accessMode: 'Access Mode',
       documentAccessTitle: 'Document Access Scope',
-      aboutTitle: 'About openclaw-webchat',
+      aboutTitle: 'About Claw WebChat',
       shareRepoHint: 'If you share this project in the community, sending the repository link here is usually enough.',
       selfManageTitle: 'Manual Start',
       authGateCopy: 'Light authentication is enabled for this instance. Enter the access password to continue.'
       ,
-      projectSummary: 'A personal-use OpenClaw WebChat focused on local-first usage, long-lived history, media uploads, and smoother agent conversations.',
+      projectSummary: 'A personal-use Claw WebChat focused on local-first usage, long-lived history, media uploads, and smoother agent conversations.',
       modelPickerIntro: 'Available models are listed below. Selecting one switches the upstream model for this agent immediately.',
       modelPickerCurrentMissing: 'The current model is not in the available list, but you can still switch to one below.'
     },
@@ -452,7 +453,7 @@ const I18N = {
       restartHintManual: 'Automatic restart is not available in the current environment. Bind-address changes must be restarted manually, while light-auth toggles and password changes still apply immediately.',
       manualStartIntroSupported: 'If you need to start or recover the service manually, follow the steps below. When LaunchAgent is registered, you can also run the restart command directly.',
       manualStartIntro: 'If you need to start or recover the service manually, follow the steps below.',
-      manualRestartFallback: 'If you use your own process manager, restart openclaw-webchat the same way you normally do.',
+      manualRestartFallback: 'If you use your own process manager, restart Claw WebChat the same way you normally do.',
       selfSubtitle: 'You',
       syncUserAvatar: 'This updates the avatar and display name used for "Me" in the message area.',
       syncAgentAvatar: 'This updates the sidebar, title bar, and message avatar for {agent}.',
@@ -570,8 +571,8 @@ const state = {
     avatarUrl: null
   },
   projectInfo: {
-    name: 'openclaw-webchat',
-    summary: '一个面向个人使用的 OpenClaw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
+    name: BRAND_NAME,
+    summary: '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: 'https://github.com/memphislee09-source/openclaw-webchat'
   },
   serviceSettings: {
@@ -586,7 +587,7 @@ const state = {
     restartSupported: false,
     restartHint: null,
     manualStart: {
-      projectDirectoryHint: '先进入 openclaw-webchat 项目目录',
+      projectDirectoryHint: '先进入 Claw WebChat 项目目录',
       installCommand: 'npm install',
       startCommand: 'npm start',
       restartCommand: null
@@ -1171,7 +1172,7 @@ function normalizeServiceSettings(payload) {
     restartSupported: payload?.restartSupported === true,
     restartHint: payload?.restartHint || null,
     manualStart: {
-      projectDirectoryHint: payload?.manualStart?.projectDirectoryHint || '先进入 openclaw-webchat 项目目录',
+      projectDirectoryHint: payload?.manualStart?.projectDirectoryHint || '先进入 Claw WebChat 项目目录',
       installCommand: payload?.manualStart?.installCommand || 'npm install',
       startCommand: payload?.manualStart?.startCommand || 'npm start',
       restartCommand: payload?.manualStart?.restartCommand || null
@@ -1181,8 +1182,8 @@ function normalizeServiceSettings(payload) {
 
 function normalizeProjectInfo(payload) {
   return {
-    name: payload?.name || 'openclaw-webchat',
-    summary: payload?.summary || '一个面向个人使用的 OpenClaw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
+    name: BRAND_NAME,
+    summary: payload?.summary || '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: payload?.githubUrl || 'https://github.com/memphislee09-source/openclaw-webchat'
   };
 }
@@ -1888,7 +1889,7 @@ function renderMessages() {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.innerHTML = `
-      <div class="eyebrow">openclaw-webchat</div>
+      <div class="eyebrow">${BRAND_NAME}</div>
       <h3>${t('status.emptyTimelineTitle')}</h3>
       <p class="empty-tip">${t('status.emptyTimelineTip')}</p>
     `;
@@ -2775,7 +2776,7 @@ function shouldOpenModelPicker(command) {
 
 function updateHeader() {
   const active = getActiveAgent();
-  chatTitleEl.textContent = active?.name || 'openclaw-webchat';
+  chatTitleEl.textContent = active?.name || BRAND_NAME;
   chatSubtitleEl.textContent = active
     ? `${active.hasSession ? t('status.timelineLongLived') : t('status.clickToCreate')} · ${active.summary || t('status.noSummary')}`
     : t('ui.selectAgent');
@@ -3729,8 +3730,8 @@ function renderProjectInfo() {
   if (settingsGithubLinkEl) {
     settingsGithubLinkEl.href = state.projectInfo.githubUrl;
     settingsGithubLinkEl.textContent = state.language === 'en'
-      ? `${state.projectInfo.name} GitHub Repository`
-      : `${state.projectInfo.name} GitHub 仓库`;
+      ? `${BRAND_NAME} GitHub Repository`
+      : `${BRAND_NAME} GitHub 仓库`;
   }
 }
 
@@ -3742,8 +3743,8 @@ function renderManualStartGuide() {
   }
   if (settingsManualStartProjectDirEl) {
     settingsManualStartProjectDirEl.textContent = state.language === 'en'
-      ? 'Enter the openclaw-webchat project directory first'
-      : state.serviceSettings.manualStart.projectDirectoryHint;
+      ? 'Enter the Claw WebChat project directory first'
+      : '先进入 Claw WebChat 项目目录';
   }
   if (settingsManualInstallCommandEl) {
     settingsManualInstallCommandEl.textContent = state.serviceSettings.manualStart.installCommand;
