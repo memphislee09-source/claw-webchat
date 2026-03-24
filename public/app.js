@@ -65,6 +65,7 @@ const I18N = {
       composerPlaceholder: '输入消息，Enter 换行；点 / 按钮或直接输入 slash 命令可执行本地命令',
       attachMedia: '上传图片或音频',
       openSlashMenu: '打开 slash 命令菜单',
+      openThinkingMenu: '打开 thinking 菜单',
       send: '发送',
       stopReply: '停止当前回复',
       workspaceSettings: 'Workspace Settings',
@@ -107,7 +108,9 @@ const I18N = {
       modelPicker: '切换模型',
       closeModelPicker: '关闭模型切换',
       currentModel: '当前模型',
-      availableModels: '可用模型'
+      availableModels: '可用模型',
+      thinking: 'Thinking',
+      currentThinking: '当前 thinking'
     },
     text: {
       contactsIntro: '统一管理用户自己和所有 agent 的显示名称与头像。头像选择本地图片后会自动裁成正方形，点击保存后才生效。',
@@ -132,7 +135,8 @@ const I18N = {
       ,
       projectSummary: '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
       modelPickerIntro: '下面列出当前可用模型，选择后会直接切换这个 agent 的上游会话模型。',
-      modelPickerCurrentMissing: '当前模型未出现在可用列表里，你仍然可以从下面选择新模型。'
+      modelPickerCurrentMissing: '当前模型未出现在可用列表里，你仍然可以从下面选择新模型。',
+      thinkingPickerIntro: '选择这个 agent 当前模型的 thinking level，切换会立即作用于当前上游会话。'
     },
     status: {
       initFailed: '初始化失败：{error}',
@@ -196,6 +200,12 @@ const I18N = {
       switchingModel: '正在切换模型到 {model}…',
       modelSwitchDone: '模型已切换到 {model}。',
       modelSwitchFailed: '模型切换失败：{error}',
+      loadingThinkingOptions: '正在加载 thinking 选项…',
+      thinkingOptionsFailed: '加载 thinking 选项失败：{error}',
+      noAvailableThinkingLevels: '当前模型没有可切换的 thinking 选项。',
+      switchingThinking: '正在切换 thinking level 到 {level}…',
+      thinkingSwitchDone: 'thinking level 已切换到 {level}。',
+      thinkingSwitchFailed: 'thinking level 切换失败：{error}',
       currentModelUnavailable: '当前模型不在可用列表里。',
       timelineLongLived: '长期主时间线',
       clickToCreate: '点击后自动创建',
@@ -289,6 +299,7 @@ const I18N = {
       composerPlaceholder: 'Type a message. Enter inserts a newline. Use the / button or type a slash command to run local commands.',
       attachMedia: 'Upload image or audio',
       openSlashMenu: 'Open slash command menu',
+      openThinkingMenu: 'Open thinking menu',
       send: 'Send',
       stopReply: 'Stop current reply',
       workspaceSettings: 'Workspace Settings',
@@ -331,7 +342,9 @@ const I18N = {
       modelPicker: 'Switch Model',
       closeModelPicker: 'Close model picker',
       currentModel: 'Current Model',
-      availableModels: 'Available Models'
+      availableModels: 'Available Models',
+      thinking: 'Thinking',
+      currentThinking: 'Current Thinking'
     },
     text: {
       contactsIntro: 'Manage display names and avatars for yourself and all agents. Local avatar images are cropped to a square and only apply after you save.',
@@ -356,7 +369,8 @@ const I18N = {
       ,
       projectSummary: 'A personal-use Claw WebChat focused on local-first usage, long-lived history, media uploads, and smoother agent conversations.',
       modelPickerIntro: 'Available models are listed below. Selecting one switches the upstream model for this agent immediately.',
-      modelPickerCurrentMissing: 'The current model is not in the available list, but you can still switch to one below.'
+      modelPickerCurrentMissing: 'The current model is not in the available list, but you can still switch to one below.',
+      thinkingPickerIntro: 'Choose the thinking level for this agent\'s current model. The change applies to the current upstream session immediately.'
     },
     status: {
       initFailed: 'Initialization failed: {error}',
@@ -420,6 +434,12 @@ const I18N = {
       switchingModel: 'Switching model to {model}…',
       modelSwitchDone: 'Model switched to {model}.',
       modelSwitchFailed: 'Failed to switch model: {error}',
+      loadingThinkingOptions: 'Loading thinking options…',
+      thinkingOptionsFailed: 'Failed to load thinking options: {error}',
+      noAvailableThinkingLevels: 'No thinking options are available for the current model.',
+      switchingThinking: 'Switching thinking level to {level}…',
+      thinkingSwitchDone: 'Thinking level switched to {level}.',
+      thinkingSwitchFailed: 'Thinking level switch failed: {error}',
       currentModelUnavailable: 'The current model is not in the available list.',
       timelineLongLived: 'Long-lived main timeline',
       clickToCreate: 'Click to create automatically',
@@ -522,6 +542,13 @@ const state = {
   modelPickerCurrent: null,
   modelPickerOptions: [],
   modelPickerSwitchingLabel: '',
+  thinkingPickerOpen: false,
+  thinkingPickerLoading: false,
+  thinkingPickerError: '',
+  thinkingPickerCurrentLevel: '',
+  thinkingPickerOptions: [],
+  thinkingPickerSwitchingLevel: '',
+  thinkingPickerModelLabel: '',
   historySearchOpen: false,
   historySearchQuery: '',
   historySearchResults: [],
@@ -572,6 +599,7 @@ const state = {
   },
   projectInfo: {
     name: BRAND_NAME,
+    version: '0.1.5',
     summary: '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: 'https://github.com/memphislee09-source/claw-webchat'
   },
@@ -622,6 +650,8 @@ const commandMenuEl = document.getElementById('commandMenu');
 const attachButtonEl = document.getElementById('attachButton');
 const mediaUploadInputEl = document.getElementById('mediaUploadInput');
 const pendingUploadsEl = document.getElementById('pendingUploads');
+const thinkingButtonEl = document.getElementById('thinkingButton');
+const thinkingMenuEl = document.getElementById('thinkingMenu');
 const openSidebarButtonEl = document.getElementById('openSidebarButton');
 const closeSidebarButtonEl = document.getElementById('closeSidebarButton');
 const sidebarBackdropEl = document.getElementById('sidebarBackdrop');
@@ -666,6 +696,9 @@ const restartServiceButtonEl = document.getElementById('restartServiceButton');
 const settingsRestartHintEl = document.getElementById('settingsRestartHint');
 const settingsDocumentAccessCopyEl = document.getElementById('settingsDocumentAccessCopy');
 const settingsAboutSummaryEl = document.getElementById('settingsAboutSummary');
+const settingsVersionLabelEl = document.getElementById('settingsVersionLabel');
+const settingsVersionValueEl = document.getElementById('settingsVersionValue');
+const settingsAboutHintEl = document.getElementById('settingsAboutHint');
 const settingsGithubLinkEl = document.getElementById('settingsGithubLink');
 const settingsManualStartIntroEl = document.getElementById('settingsManualStartIntro');
 const settingsManualStartProjectDirEl = document.getElementById('settingsManualStartProjectDir');
@@ -730,6 +763,8 @@ function bindEvents() {
   attachButtonEl.addEventListener('click', () => mediaUploadInputEl.click());
   mediaUploadInputEl.addEventListener('change', handleFileSelection);
   composerInputEl.addEventListener('input', autoResizeComposer);
+  thinkingButtonEl?.addEventListener('click', toggleThinkingMenu);
+  thinkingMenuEl?.addEventListener('click', handleThinkingMenuClick);
   messageListEl.addEventListener('scroll', async () => {
     state.autoScrollPinned = isNearBottom();
     if (messageListEl.scrollTop > 64) return;
@@ -888,6 +923,8 @@ function renderLocalizedChrome() {
   composerInputEl.placeholder = t('ui.composerPlaceholder');
   attachButtonEl?.setAttribute('aria-label', t('ui.attachMedia'));
   attachButtonEl?.setAttribute('title', t('ui.attachMedia'));
+  thinkingButtonEl?.setAttribute('aria-label', t('ui.openThinkingMenu'));
+  thinkingButtonEl?.setAttribute('title', getThinkingButtonTitle());
   newContextButtonEl?.setAttribute('aria-label', t('ui.openSlashMenu'));
   renderSendButtonState();
   closeSettingsButtonEl?.setAttribute('aria-label', t('ui.closeSettings'));
@@ -908,6 +945,7 @@ function renderLocalizedChrome() {
   if (modelPickerCopyEl) modelPickerCopyEl.textContent = t('text.modelPickerIntro');
   if (modelPickerCurrentLabelEl) modelPickerCurrentLabelEl.textContent = t('ui.currentModel');
   if (closeModelPickerButtonEl) closeModelPickerButtonEl.setAttribute('aria-label', t('ui.closeModelPicker'));
+  renderThinkingMenu();
   settingsButtonEl?.querySelectorAll('span')?.[1] && (settingsButtonEl.querySelectorAll('span')[1].textContent = openSettingsLabel);
   settingsPanelEl?.querySelector('.eyebrow') && (settingsPanelEl.querySelector('.eyebrow').textContent = t('ui.workspaceSettings'));
   settingsPanelEl?.querySelector('h3') && (settingsPanelEl.querySelector('h3').textContent = t('ui.settings'));
@@ -967,8 +1005,8 @@ function renderLocalizedChrome() {
   aboutSection?.querySelector('.settings-section-title') && (aboutSection.querySelector('.settings-section-title').textContent = t('text.aboutTitle'));
   const projectLinksTitle = aboutSection?.querySelector('.settings-card .settings-section-title');
   if (projectLinksTitle) projectLinksTitle.textContent = t('ui.projectLinks');
-  const aboutHint = aboutSection?.querySelector('.settings-field-hint');
-  if (aboutHint) aboutHint.textContent = t('text.shareRepoHint');
+  if (settingsVersionLabelEl) settingsVersionLabelEl.textContent = state.language === 'en' ? 'Version' : '版本';
+  if (settingsAboutHintEl) settingsAboutHintEl.textContent = t('text.shareRepoHint');
 
   const manualSection = settingsManualStartSectionEl;
   manualSection?.querySelector('.settings-section-title') && (manualSection.querySelector('.settings-section-title').textContent = t('ui.manualStart'));
@@ -1183,6 +1221,7 @@ function normalizeServiceSettings(payload) {
 function normalizeProjectInfo(payload) {
   return {
     name: BRAND_NAME,
+    version: payload?.version || '0.1.5',
     summary: payload?.summary || '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: payload?.githubUrl || 'https://github.com/memphislee09-source/claw-webchat'
   };
@@ -1472,6 +1511,7 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
   if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
   if (state.activeAgentId !== agentId) {
     closeModelPicker({ preserveData: false });
+    closeThinkingMenu({ preserveData: false });
     resetHistorySearch({ keepOpen: false });
   }
 
@@ -1489,6 +1529,7 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
     const response = await apiPost(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/open`, {});
     if (requestId !== state.openRequestId || state.activeAgentId !== agentId) return;
     state.activeSessionKey = response.sessionKey;
+    await refreshThinkingButtonState({ sessionKey: response.sessionKey, silent: true });
     state.messages = Array.isArray(response.history?.messages) ? response.history.messages : [];
     state.nextBefore = response.history?.nextBefore || null;
     state.hasMore = Boolean(response.history?.hasMore);
@@ -2606,6 +2647,9 @@ function renderCommandMenu() {
 
 function toggleCommandMenu(event) {
   event?.stopPropagation?.();
+  if (state.thinkingPickerOpen) {
+    closeThinkingMenu();
+  }
   setCommandMenuOpen(commandMenuEl?.classList.contains('hidden'));
 }
 
@@ -2629,6 +2673,12 @@ function handleGlobalDocumentClick(event) {
   if (commandMenuEl && !commandMenuEl.classList.contains('hidden')) {
     if (!commandMenuEl.contains(target) && !newContextButtonEl.contains(target)) {
       closeCommandMenu();
+    }
+  }
+
+  if (thinkingMenuEl && !thinkingMenuEl.classList.contains('hidden')) {
+    if (!thinkingMenuEl.contains(target) && !thinkingButtonEl.contains(target) && !path.includes(thinkingMenuEl)) {
+      closeThinkingMenu();
     }
   }
 
@@ -2715,6 +2765,9 @@ async function executeSlashCommand(command) {
   try {
     const response = await apiPost(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/command`, { command });
     if (response?.message && isOperationContextActive(context)) state.messages.push(response.message);
+    if (isOperationContextActive(context) && shouldRefreshThinkingStateForCommand(command)) {
+      await refreshThinkingButtonState({ sessionKey: targetSessionKey, silent: true });
+    }
     if (isOperationContextActive(context)) {
       renderMessages();
       maybeScrollMessagesToBottom(true);
@@ -2764,6 +2817,11 @@ function getSlashCommandName(text) {
   return parseSlashCommandInput(text)?.name || '';
 }
 
+function shouldRefreshThinkingStateForCommand(command) {
+  const name = getSlashCommandName(command);
+  return name === '/think' || name === '/new' || name === '/reset' || name === '/model' || name === '/models';
+}
+
 function isWhitelistedSlash(commandName) {
   return state.allowedCommands.has(normalizeSlashCommandName(commandName));
 }
@@ -2783,6 +2841,9 @@ function updateHeader() {
     : t('ui.selectAgent');
   headerPresenceEl.className = `presence-dot ${normalizePresence(active?.presence || 'idle')}`;
   if (!active) {
+    if (state.thinkingPickerOpen) {
+      closeThinkingMenu({ preserveData: false });
+    }
     if (state.modelPickerOpen) {
       closeModelPicker({ preserveData: false });
     }
@@ -2812,6 +2873,247 @@ function normalizeModelOption(option) {
 function isSameModelOption(left, right) {
   if (!left || !right) return false;
   return left.provider === right.provider && left.model === right.model;
+}
+
+function normalizeThinkingOption(option) {
+  const value = String(option?.value || option?.level || '').trim();
+  if (!value) return null;
+  const label = String(option?.label || value).trim() || value;
+  return { value, label };
+}
+
+function getThinkingButtonLabel() {
+  const currentLevel = String(state.thinkingPickerCurrentLevel || '').trim().toLowerCase();
+  if (!currentLevel) return 'T';
+  const map = {
+    off: 'Off',
+    minimal: 'Min',
+    low: 'L',
+    medium: 'M',
+    high: 'H',
+    xhigh: 'X',
+    adaptive: 'Ada',
+    on: 'On'
+  };
+  return `T:${map[currentLevel] || currentLevel}`;
+}
+
+function getThinkingButtonTitle() {
+  const baseLabel = t('ui.openThinkingMenu');
+  const currentLabel = String(state.thinkingPickerCurrentLevel || '').trim();
+  return currentLabel ? `${baseLabel} · ${currentLabel}` : baseLabel;
+}
+
+function applyThinkingPickerPayload(payload) {
+  state.thinkingPickerCurrentLevel = String(payload?.currentLevel || '').trim();
+  if (Array.isArray(payload?.options)) {
+    state.thinkingPickerOptions = payload.options.map(normalizeThinkingOption).filter(Boolean);
+  }
+  if (payload?.modelLabel !== undefined) {
+    state.thinkingPickerModelLabel = String(payload?.modelLabel || '').trim();
+  }
+}
+
+async function refreshThinkingButtonState({ sessionKey = state.activeSessionKey, silent = true } = {}) {
+  if (!sessionKey) {
+    state.thinkingPickerCurrentLevel = '';
+    state.thinkingPickerOptions = [];
+    state.thinkingPickerModelLabel = '';
+    renderThinkingMenu();
+    return;
+  }
+
+  try {
+    const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/thinking-options`);
+    if (state.activeSessionKey !== sessionKey) return;
+    applyThinkingPickerPayload(payload);
+    if (!state.thinkingPickerOpen) {
+      state.thinkingPickerError = '';
+    }
+    renderThinkingMenu();
+  } catch (error) {
+    if (state.activeSessionKey !== sessionKey) return;
+    if (!silent) {
+      state.thinkingPickerError = t('status.thinkingOptionsFailed', { error: formatError(error) });
+      renderThinkingMenu();
+      showStatus(state.thinkingPickerError, 'error');
+    } else {
+      renderThinkingMenu();
+    }
+  }
+}
+
+function closeThinkingMenu({ preserveData = true } = {}) {
+  state.thinkingPickerOpen = false;
+  state.thinkingPickerLoading = false;
+  state.thinkingPickerSwitchingLevel = '';
+  if (!preserveData) {
+    state.thinkingPickerError = '';
+    state.thinkingPickerCurrentLevel = '';
+    state.thinkingPickerOptions = [];
+    state.thinkingPickerModelLabel = '';
+  }
+  renderThinkingMenu();
+}
+
+function toggleThinkingMenu(event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  if (state.thinkingPickerOpen) {
+    closeThinkingMenu();
+    return;
+  }
+  closeCommandMenu();
+  void openThinkingMenu();
+}
+
+async function openThinkingMenu() {
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  const targetSessionKey = state.activeSessionKey;
+
+  state.thinkingPickerOpen = true;
+  state.thinkingPickerLoading = true;
+  state.thinkingPickerError = '';
+  state.thinkingPickerCurrentLevel = '';
+  state.thinkingPickerOptions = [];
+  state.thinkingPickerSwitchingLevel = '';
+  state.thinkingPickerModelLabel = '';
+  renderThinkingMenu();
+  showStatus(t('status.loadingThinkingOptions'), 'info');
+
+  try {
+    const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/thinking-options`);
+    if (state.activeSessionKey !== targetSessionKey) return;
+    applyThinkingPickerPayload(payload);
+    state.thinkingPickerLoading = false;
+    state.thinkingPickerError = state.thinkingPickerOptions.length ? '' : t('status.noAvailableThinkingLevels');
+    renderThinkingMenu();
+  } catch (error) {
+    if (state.activeSessionKey !== targetSessionKey) return;
+    state.thinkingPickerLoading = false;
+    state.thinkingPickerError = t('status.thinkingOptionsFailed', { error: formatError(error) });
+    renderThinkingMenu();
+    showStatus(state.thinkingPickerError, 'error');
+  }
+}
+
+function renderThinkingMenu() {
+  if (thinkingButtonEl) {
+    thinkingButtonEl.textContent = getThinkingButtonLabel();
+    thinkingButtonEl.setAttribute('aria-expanded', state.thinkingPickerOpen ? 'true' : 'false');
+    thinkingButtonEl.setAttribute('title', getThinkingButtonTitle());
+  }
+  if (!thinkingMenuEl || !thinkingButtonEl) return;
+
+  const open = state.thinkingPickerOpen;
+  thinkingMenuEl.hidden = !open;
+  thinkingMenuEl.classList.toggle('hidden', !open);
+  thinkingMenuEl.innerHTML = '';
+
+  if (!open) return;
+
+  const header = document.createElement('div');
+  header.className = 'thinking-menu-header';
+
+  const title = document.createElement('div');
+  title.className = 'thinking-menu-title';
+  title.textContent = t('ui.thinking');
+
+  const model = document.createElement('div');
+  model.className = 'thinking-menu-model';
+  model.textContent = state.thinkingPickerModelLabel || t('text.thinkingPickerIntro');
+
+  const current = document.createElement('div');
+  current.className = 'thinking-menu-current';
+  current.textContent = state.thinkingPickerCurrentLevel
+    ? `${t('ui.currentThinking')}：${state.thinkingPickerCurrentLevel}`
+    : t('text.thinkingPickerIntro');
+
+  header.append(title, model, current);
+  thinkingMenuEl.append(header);
+
+  if (!state.thinkingPickerOptions.length) {
+    const empty = document.createElement('div');
+    empty.className = 'thinking-menu-empty';
+    empty.textContent = state.thinkingPickerLoading
+      ? t('status.loadingThinkingOptions')
+      : (state.thinkingPickerError || t('status.noAvailableThinkingLevels'));
+    thinkingMenuEl.append(empty);
+    return;
+  }
+
+  const options = document.createElement('div');
+  options.className = 'thinking-menu-options';
+  for (const option of state.thinkingPickerOptions) {
+    options.append(createThinkingMenuOption(option));
+  }
+  thinkingMenuEl.append(options);
+}
+
+function createThinkingMenuOption(option) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'thinking-option';
+  button.dataset.level = option.value;
+
+  const isCurrent = option.value === state.thinkingPickerCurrentLevel;
+  const isSwitching = Boolean(state.thinkingPickerSwitchingLevel) && state.thinkingPickerSwitchingLevel === option.value;
+
+  button.classList.toggle('active', isCurrent);
+  button.disabled = state.thinkingPickerLoading || Boolean(state.thinkingPickerSwitchingLevel);
+  button.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+
+  const label = document.createElement('span');
+  label.className = 'thinking-option-label';
+  label.textContent = option.label;
+
+  const badge = document.createElement('span');
+  badge.className = 'thinking-option-badge';
+  badge.textContent = isSwitching
+    ? (state.language === 'en' ? 'Switching' : '切换中')
+    : (isCurrent ? t('ui.currentThinking') : (state.language === 'en' ? 'Use' : '使用'));
+
+  button.append(label, badge);
+  return button;
+}
+
+async function handleThinkingMenuClick(event) {
+  const button = event.target.closest('.thinking-option');
+  if (!button || !state.thinkingPickerOpen) return;
+  const level = String(button.dataset.level || '').trim();
+  if (!level || level === state.thinkingPickerCurrentLevel) return;
+  await switchSessionThinkingLevel(level);
+}
+
+async function switchSessionThinkingLevel(level) {
+  if (!state.activeSessionKey) return;
+  const targetSessionKey = state.activeSessionKey;
+
+  state.thinkingPickerError = '';
+  state.thinkingPickerSwitchingLevel = level;
+  renderThinkingMenu();
+  showStatus(t('status.switchingThinking', { level }), 'info');
+
+  try {
+    const payload = await apiPatch(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/thinking`, {
+      thinkingLevel: level
+    });
+    if (state.activeSessionKey !== targetSessionKey) return;
+    applyThinkingPickerPayload(payload);
+    if (!state.thinkingPickerCurrentLevel) {
+      state.thinkingPickerCurrentLevel = level;
+    }
+    state.thinkingPickerSwitchingLevel = '';
+    renderThinkingMenu();
+    closeThinkingMenu();
+    showStatus(t('status.thinkingSwitchDone', { level: state.thinkingPickerCurrentLevel || level }), 'success');
+  } catch (error) {
+    if (state.activeSessionKey !== targetSessionKey) return;
+    state.thinkingPickerSwitchingLevel = '';
+    state.thinkingPickerError = t('status.thinkingSwitchFailed', { error: formatError(error) });
+    renderThinkingMenu();
+    showStatus(state.thinkingPickerError, 'error');
+  }
 }
 
 function closeModelPicker({ preserveData = true } = {}) {
@@ -2968,6 +3270,7 @@ async function switchSessionModel(option) {
       ? payload.models.map(normalizeModelOption).filter(Boolean)
       : state.modelPickerOptions;
     state.modelPickerSwitchingLabel = '';
+    await refreshThinkingButtonState({ sessionKey: targetSessionKey, silent: true });
     renderModelPicker();
     closeModelPicker();
     showStatus(t('status.modelSwitchDone', { model: state.modelPickerCurrent?.label || targetLabel }), 'success');
@@ -3573,6 +3876,10 @@ function handleWindowKeydown(event) {
   }
 
   if (event.key === 'Escape') {
+    if (state.thinkingPickerOpen) {
+      closeThinkingMenu();
+      return;
+    }
     if (state.modelPickerOpen) {
       closeModelPicker();
       return;
@@ -3727,6 +4034,9 @@ function switchSettingsTab(tab) {
 function renderProjectInfo() {
   if (settingsAboutSummaryEl) {
     settingsAboutSummaryEl.textContent = t('text.projectSummary');
+  }
+  if (settingsVersionValueEl) {
+    settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.5';
   }
   if (settingsGithubLinkEl) {
     settingsGithubLinkEl.href = state.projectInfo.githubUrl;
@@ -4168,10 +4478,13 @@ function setComposerEnabled({ canAccess, busy, stopping }) {
   composerInputEl.disabled = composerLocked;
   sendButtonEl.disabled = !canAccess || stopping;
   newContextButtonEl.disabled = composerLocked;
+  if (thinkingButtonEl) thinkingButtonEl.disabled = composerLocked;
   attachButtonEl.disabled = composerLocked;
   mediaUploadInputEl.disabled = composerLocked;
   if (composerLocked) closeCommandMenu();
+  if (composerLocked) closeThinkingMenu();
   renderSendButtonState();
+  renderThinkingMenu();
   renderPendingUploads();
 }
 

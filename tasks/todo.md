@@ -23,6 +23,9 @@
 - [x] Merge `codex/desktop-media-70vw` back into `main`
 - [x] Update docs so `main` becomes the new development baseline
 - [x] Verify merged `main` and sync it to GitHub
+- [x] Add a composer-side `T` button for the current agent thinking level
+- [x] Expose a dedicated thinking-options/settings API for the current session
+- [x] Verify the thinking picker flow with `npm run check` and `npm run selftest`
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -105,3 +108,18 @@
     change and the right-side scroll stabilization are now the official development baseline.
   - Updated `CHANGELOG.md`, `status.md`, and `docs/HANDOFF-2026-03-24.md` to remove the old
     “experimental branch only” wording and mark `main` as the branch to continue from.
+- Thinking picker follow-up:
+  - Added a dedicated `T` button to the right side of the composer, next to the existing slash and
+    send controls, so users can change the current agent session's thinking level without typing
+    `/think` manually.
+  - The composer button label is now dynamic and reflects the current session thinking level as
+    `T:Off`, `T:Min`, `T:L`, `T:M`, `T:H`, `T:X`, or `T:Ada` when available; binary providers also
+    preserve `T:On` when the current model only exposes `off/on`.
+  - Added session-scoped `GET /api/openclaw-webchat/sessions/:sessionKey/thinking-options` and
+    `PATCH /api/openclaw-webchat/sessions/:sessionKey/thinking` endpoints, which reuse the current
+    upstream session state and avoid polluting chat history with UI-only configuration changes.
+  - The thinking menu is model-aware: it shows the current session model label plus the normalized
+    thinking options for that model, including binary `off/on` providers and `xhigh`-capable
+    models.
+  - Verification passed: `npm run check`, LaunchAgent restart, `http://127.0.0.1:3770/healthz`,
+    and `npm run selftest`.

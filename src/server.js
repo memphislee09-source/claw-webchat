@@ -10,6 +10,7 @@ import { parseTextIntoBlocks } from '../public/message-blocks.js';
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
 
 const app = express();
 const PORT = Number(process.env.OPENCLAW_WEBCHAT_PORT || 3770);
@@ -44,6 +45,7 @@ const AUTH_COOKIE_NAME = 'openclaw_webchat_auth';
 const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PROJECT_GITHUB_URL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_GITHUB_URL)
   || 'https://github.com/memphislee09-source/claw-webchat';
+const PROJECT_VERSION = normalizeOptionalString(PACKAGE_JSON?.version) || '0.1.5';
 const RESTART_LABEL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_LAUNCHD_LABEL)
   || normalizeOptionalString(process.env.XPC_SERVICE_NAME)
   || 'ai.openclaw.webchat';
@@ -353,6 +355,59 @@ app.patch('/api/openclaw-webchat/sessions/:sessionKey/model', async (req, res) =
       ok: true,
       current: nextState.current,
       models: nextState.models,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.get('/api/openclaw-webchat/sessions/:sessionKey/thinking-options', async (req, res) => {
+  const { sessionKey } = req.params;
+  const sessionBinding = getBindingBySessionKey(sessionKey);
+
+  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+
+  try {
+    const payload = await loadThinkingCommandState(sessionBinding.upstreamSessionKey);
+    res.json(presentThinkingPickerState(payload));
+  } catch (error) {
+    res.status(500).json({ error: formatError(error) });
+  }
+});
+
+app.patch('/api/openclaw-webchat/sessions/:sessionKey/thinking', async (req, res) => {
+  const { sessionKey } = req.params;
+  const sessionBinding = getBindingBySessionKey(sessionKey);
+  const rawLevel = normalizeOptionalString(req.body?.thinkingLevel) || normalizeOptionalString(req.body?.level);
+
+  if (!sessionBinding) return res.status(404).json({ error: 'Session not found.' });
+  if (!rawLevel) {
+    return res.status(400).json({ error: 'thinkingLevel is required.' });
+  }
+
+  const normalizedLevel = normalizeThinkLevel(rawLevel);
+  if (!normalizedLevel) {
+    try {
+      const payload = await loadThinkingCommandState(sessionBinding.upstreamSessionKey);
+      return res.status(400).json({
+        error: `Unknown thinking level: ${rawLevel}`,
+        options: listThinkingLevelLabels(payload?.session?.modelProvider, payload?.session?.model)
+      });
+    } catch (error) {
+      return res.status(400).json({ error: `Unknown thinking level: ${rawLevel}. ${formatError(error)}` });
+    }
+  }
+
+  try {
+    await gatewayCall('sessions.patch', {
+      key: sessionBinding.upstreamSessionKey,
+      thinkingLevel: normalizedLevel
+    });
+    const payload = await loadThinkingCommandState(sessionBinding.upstreamSessionKey);
+    res.json({
+      ok: true,
+      ...presentThinkingPickerState(payload),
       updatedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -917,7 +972,12 @@ async function runThinkSlashCommand(binding, command, args) {
 
   try {
     await gatewayCall('sessions.patch', { key: binding.upstreamSessionKey, thinkingLevel: level });
-    return buildAssistantSlashResponse(binding, command, `已设置 thinking level：${level}`);
+    const { session, models } = await loadThinkingCommandState(binding.upstreamSessionKey);
+    return buildAssistantSlashResponse(
+      binding,
+      command,
+      `已设置 thinking level：${resolveCurrentThinkingLevel(session, models)}`
+    );
   } catch (error) {
     return buildAssistantSlashResponse(binding, command, `设置 thinking level 失败：${formatError(error)}`);
   }
@@ -1303,13 +1363,15 @@ function normalizeVerboseLevel(value) {
 
 function resolveCurrentThinkingLevel(sessionRow, models = []) {
   const persisted = normalizeThinkLevel(sessionRow?.thinkingLevel);
-  if (persisted) return persisted;
+  if (persisted) {
+    return presentThinkingLevelLabelForModel(persisted, sessionRow?.modelProvider);
+  }
   if (!sessionRow?.modelProvider || !sessionRow?.model) return 'off';
-  return resolveThinkingDefaultForModel({
+  return presentThinkingLevelLabelForModel(resolveThinkingDefaultForModel({
     provider: sessionRow.modelProvider,
     model: sessionRow.model,
     catalog: models
-  });
+  }), sessionRow?.modelProvider);
 }
 
 function resolveCurrentFastMode(sessionRow) {
@@ -1325,6 +1387,29 @@ function listThinkingLevelLabels(provider, model) {
     return ['off', 'on'];
   }
   return listThinkingLevels(provider, model);
+}
+
+function presentThinkingLevelLabelForModel(level, provider) {
+  const normalized = normalizeThinkLevel(level);
+  if (!normalized) return 'off';
+  if (isBinaryThinkingProvider(provider)) {
+    return normalized === 'off' ? 'off' : 'on';
+  }
+  return normalized;
+}
+
+function presentThinkingPickerState(payload) {
+  const session = payload?.session || null;
+  const models = Array.isArray(payload?.models) ? payload.models : [];
+  return {
+    currentLevel: resolveCurrentThinkingLevel(session, models),
+    options: listThinkingLevelLabels(session?.modelProvider, session?.model).map((level) => ({
+      value: level,
+      label: level
+    })),
+    modelLabel: formatModelDescriptorLabel(session?.modelProvider, session?.model),
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function listThinkingLevels(provider, model) {
@@ -2665,6 +2750,7 @@ function presentServiceSettings() {
 function presentProjectInfo() {
   return {
     name: 'openclaw-webchat',
+    version: PROJECT_VERSION,
     summary: '一个面向个人使用的 OpenClaw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: PROJECT_GITHUB_URL
   };

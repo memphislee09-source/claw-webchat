@@ -61,6 +61,8 @@ async function checkPageShell() {
   assert(html.includes('id="mediaUploadInput"'), 'page should contain mediaUploadInput');
   assert(html.includes('id="newContextButton"'), 'page should contain slash trigger button');
   assert(html.includes('id="commandMenu"'), 'page should contain command menu');
+  assert(html.includes('id="thinkingButton"'), 'page should contain thinking trigger button');
+  assert(html.includes('id="thinkingMenu"'), 'page should contain thinking options menu');
   assert(html.includes('class="primary-button send-button"'), 'page should contain icon-style send button');
   assert(html.includes('id="historySearchShell"'), 'page should contain persistent history search shell');
   assert(html.includes('id="historySearchPanel"'), 'page should contain history search panel');
@@ -107,6 +109,10 @@ async function checkPageShell() {
   assert(appJs.includes('async function openModelPicker'), 'app.js should include model picker loader');
   assert(appJs.includes('async function switchSessionModel'), 'app.js should include model switch handler');
   assert(appJs.includes('async function stopActiveSessionReply'), 'app.js should include current reply stop handler');
+  assert(appJs.includes('async function openThinkingMenu'), 'app.js should include thinking picker loader');
+  assert(appJs.includes('async function switchSessionThinkingLevel'), 'app.js should include thinking switch handler');
+  assert(appJs.includes('function getThinkingButtonLabel()'), 'app.js should include dynamic thinking button label helper');
+  assert(appJs.includes("thinkingButtonEl.textContent = getThinkingButtonLabel();"), 'app.js should render the current thinking level on the composer button');
   assert(appJs.includes('function renderSendButtonState'), 'app.js should include send/stop button state renderer');
   assert(appJs.includes('function attachVideoPreview'), 'app.js should include video preview helper');
   assert(appJs.includes('function handleMediaViewerPointerDown'), 'app.js should include image pan flow');
@@ -117,6 +123,8 @@ async function checkPageShell() {
   assert(appJs.includes('const previousTop = messageListEl.scrollTop;'), 'app.js should preserve pre-load scroll offset when prepending history');
   assert(appJs.includes('previousTop + (nextHeight - previousHeight)'), 'app.js should restore scroll position relative to prepended history height');
   assert(appJs.includes('return state.autoScrollPinned;'), 'app.js should not force bottom stickiness solely because the active session is busy');
+  assert(appJs.includes("const settingsVersionValueEl = document.getElementById('settingsVersionValue');"), 'app.js should bind the About settings version element');
+  assert(appJs.includes("settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.5';"), 'app.js should render the current project version in About settings');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
   assert(css.includes('.command-menu'), 'styles.css should include slash command menu styles');
@@ -134,6 +142,8 @@ async function checkPageShell() {
   assert(css.includes('.message-list.showing-history-target > :first-child'), 'styles.css should disable bottom anchoring when showing a history target');
   assert(css.includes('scroll-behavior: auto;'), 'styles.css should keep the message list on direct scroll behavior to avoid overlapping scroll animations');
   assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
+  assert(css.includes('.thinking-menu'), 'styles.css should include thinking menu styles');
+  assert(css.includes('.thinking-option'), 'styles.css should include thinking option styles');
   assert(css.includes('.model-picker'), 'styles.css should include model picker overlay styles');
   assert(css.includes('.model-picker-card'), 'styles.css should include model picker card styles');
   assert(css.includes('.model-picker-option'), 'styles.css should include model picker option styles');
@@ -219,8 +229,12 @@ async function checkSettings() {
   const settings = await getJson('/api/openclaw-webchat/settings');
   assert(settings?.userProfile, 'settings should return userProfile');
   assert(settings?.serviceSettings, 'settings should return serviceSettings');
+  assert(typeof settings?.projectInfo?.version === 'string', 'settings should return project version');
   assert(typeof settings?.authStatus?.enabled === 'boolean', 'settings should return auth status');
   assert(typeof settings.userProfile.displayName === 'string', 'settings should include displayName');
+
+  const indexHtml = await getText('/');
+  assert(indexHtml.includes('id="settingsVersionValue"'), 'index.html should include About settings version field');
 
   const patched = await patchJson('/api/openclaw-webchat/settings/user-profile', {
     displayName: 'Selftest',
@@ -353,6 +367,18 @@ async function checkSlashCommands() {
   assert(thinkText.includes('当前 thinking level：'), '/think should return current thinking level');
   const currentLevel = thinkText.match(/当前 thinking level：([^\n]+)/)?.[1]?.trim();
   assert(currentLevel, '/think should expose current thinking level');
+
+  const thinkingOptions = await getJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/thinking-options`);
+  assert(typeof thinkingOptions?.currentLevel === 'string', 'thinking-options should return current thinking level');
+  assert(Array.isArray(thinkingOptions?.options), 'thinking-options should return selectable level list');
+  assert(thinkingOptions.options.length > 0, 'thinking-options should include at least one selectable level');
+  const currentThinkingOption = thinkingOptions.options.find((item) => item?.value === thinkingOptions.currentLevel) || thinkingOptions.options[0];
+
+  const thinkingPatch = await patchJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/thinking`, {
+    thinkingLevel: currentThinkingOption.value
+  });
+  assert(thinkingPatch?.ok === true, 'thinking patch endpoint should succeed');
+  assert(thinkingPatch?.currentLevel === currentThinkingOption.value, 'thinking patch endpoint should persist current level');
 
   const thinkSet = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/command`, {
     command: `/think ${currentLevel}`

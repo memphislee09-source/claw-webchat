@@ -141,6 +141,10 @@
                   <button class="ghost-button command-trigger" type="button" id="newContextButton" aria-label="打开 slash 命令菜单" aria-haspopup="menu" aria-expanded="false">/</button>
                   <div class="command-menu hidden" id="commandMenu"></div>
                 </div>
+                <div class="thinking-picker">
+                  <button class="ghost-button thinking-trigger" type="button" id="thinkingButton" aria-label="打开 thinking 菜单" aria-haspopup="menu" aria-expanded="false">T</button>
+                  <div class="thinking-menu hidden" id="thinkingMenu"></div>
+                </div>
                 <button class="primary-button send-button" type="submit" id="sendButton" aria-label="发送" title="发送">➤</button>
               </div>
             </form>
@@ -387,11 +391,12 @@
                   <p class="settings-section-copy" id="settingsAboutSummary">一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。</p>
 
                   <div class="settings-card">
+                    <div class="settings-field-hint"><span id="settingsVersionLabel">版本</span> <code id="settingsVersionValue">0.1.5</code></div>
                     <div class="settings-section-title">项目链接</div>
                     <div class="settings-link-list">
                       <a id="settingsGithubLink" href="https://github.com/memphislee09-source/claw-webchat" target="_blank" rel="noreferrer">GitHub 仓库</a>
                     </div>
-                    <div class="settings-field-hint">如果你在社区里分享这个项目，优先把这里的仓库链接发出去即可。</div>
+                    <div class="settings-field-hint" id="settingsAboutHint">如果你在社区里分享这个项目，优先把这里的仓库链接发出去即可。</div>
                   </div>
                 </div>
               </div>
