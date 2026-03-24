@@ -35,7 +35,7 @@
 - [x] Remove the duplicate `/model` picker intro copy from the modal body
 - [x] Update task/docs records for the `/model` picker copy follow-up
 - [x] Verify the follow-up with `npm run check`
-- [ ] Commit and push the `/model` picker copy follow-up to GitHub
+- [x] Commit and push the `/model` picker copy follow-up to GitHub
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -170,3 +170,4 @@
     success notice, warning, or error to show, so the top explanatory copy remains the only intro.
   - Synced the follow-up into `CHANGELOG.md`, `status.md`, and `docs/HANDOFF-2026-03-24.md`.
   - Verification passed: `npm run check`.
+  - Synced to GitHub on `main` with commit `40e80e0` (`fix: remove duplicate model picker copy`).
