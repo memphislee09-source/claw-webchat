@@ -1085,7 +1085,7 @@ button {
 .message-image-button,
 .message-video-shell {
   width: fit-content;
-  max-width: min(420px, 100%);
+  max-width: min(70vw, 100%);
   border: 0;
   padding: 0;
   background: transparent;
@@ -1101,7 +1101,7 @@ button {
 .message-image,
 .message-video {
   display: block;
-  max-width: min(420px, 100%);
+  max-width: min(70vw, 100%);
   width: 100%;
   max-height: min(60vh, 520px);
   border-radius: 16px;

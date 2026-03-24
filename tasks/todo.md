@@ -11,6 +11,9 @@
 - [x] Verify with `npm run check` and `npm run selftest`
 - [x] Update status, handoff, changelog, and error-log docs for the media protocol fix
 - [x] Commit and push the media protocol fix to GitHub
+- [x] Investigate why wangyuyan news-brief images appear shrunken in Claw WebChat
+- [x] Create experimental branch for desktop media default max-width = 70vw
+- [x] Verify and hand off the 70vw desktop media experiment branch
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -44,3 +47,17 @@
     assertion that the bootstrap contract keeps the new media guidance.
   - Verification passed: `npm run check`, `npm run selftest`.
   - Synced to GitHub on `main` with commit `59aa488` (`fix: tighten webchat media bootstrap`).
+- Wangyuyan news-brief image sizing investigation:
+  - The reproduced message is the long March 24 news brief with alternating text/image blocks in
+    a single assistant message.
+  - That message does not enter the `visual-media-bubble` branch because
+    `shouldUseVisualMediaBubble(...)` falls back to a regular bubble whenever total text length is
+    greater than `220`.
+  - In the regular bubble branch, images and video are globally capped at `max-width: min(420px, 100%)`,
+    so large remote news images from BBC/MS NOW are intentionally shrunk on desktop.
+- 70vw experiment setup:
+  - Created branch `codex/desktop-media-70vw`.
+  - In the regular media branch only, desktop/default image and video max-width was changed from
+    `min(420px, 100%)` to `min(70vw, 100%)` for visual comparison, without changing the
+    `visual-media-bubble` decision logic.
+  - Verification passed: `npm run check`.
