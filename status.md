@@ -108,12 +108,14 @@
 - 仍保留的历史实验分支：
   - `codex/image-bubble-width-experiment`
   - `codex/mobile-history-test`
+  - `codex/desktop-media-70vw`
 
 ## 已知重点
 - 2026-03-24 `0.1.5` 已将历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布准备资料和图片查看器缩放读数修复一起并入 `main`
 - 2026-03-24 已修复 `sessionKey` 前缀不一致：服务端会把历史 `claw-webchat:*` 绑定自动规范到 `openclaw-webchat:*`，并继续兼容旧 key 请求
 - 2026-03-24 已完成显示层品牌改名：用户可见项目名统一为 `Claw WebChat`，但后端技术标识仍保持 `openclaw-webchat`
 - 2026-03-24 已修复 Athena 发图时误走 `message` 工具的问题：隐藏 bootstrap 现在更短但更明确，agent 默认知道用 `MEDIA:` / `mediaUrl:` 回传本地媒体与远程直链媒体
+- 2026-03-24 分支 `codex/desktop-media-70vw` 已收口两项实验内修复：常规桌面媒体默认上限调整为 `70vw`，以及右侧消息区滚动乱跳修复；当前用户已完成一轮主观验收，是否并回 `main` 仍待后续决定
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题
 - 2026-03-22 已补上当前 agent 级模型切换弹窗：无参 `/model` / `/models` 会弹出可用模型列表，点击后直接切换当前 agent 的上游 session 模型

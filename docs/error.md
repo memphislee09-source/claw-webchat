@@ -32,3 +32,4 @@
 
 ## 2026-03-24
 - Athena 在 Claw WebChat 中不会把已生成图片正确发回 / 原因：当前隐藏 bootstrap 虽然提到了 `MEDIA:` / `mediaUrl:` fallback，但约束不够明确；`gpt-5.4` 会优先尝试 `message` 工具并使用不存在的 `webchat` channel，最终误判为“当前没有可用的 webchat 附件发送通道” / 修复：将隐藏 bootstrap 收短并明确写死本地文件与直链远程 `http/https` 媒体的正确回传方式，要求优先结构化 media block，fallback 时使用单独一行 `MEDIA:<path-or-url>` / `mediaUrl: <path-or-url>`，并明确禁止 `message` / `webchat` 发送路径；同时提升 `BOOTSTRAP_VERSION` 让现有会话自动补吃新版约定，并在自测中增加本地路径与远程 URL fallback 断言 / 预防措施：渠道级媒体协议提示必须同时满足“足够明确”和“足够短”；一旦发现某类模型倾向走错误工具路径，应优先收紧 bootstrap 文案并补静态回归，避免靠逐个 agent 手工提醒
+- 右侧对话区滚动时经常乱跳 / 原因：历史上拉补页时仅按 `nextHeight - previousHeight` 恢复滚动，遗漏原始 `scrollTop`；同时只要当前 agent 处于处理中，重渲染就会强制贴底；再叠加消息列表的 `scroll-behavior: smooth`，手动滚动、补页和自动滚动动画会互相打架 / 修复：补历史时按“原 `scrollTop` + 新增高度差”恢复位置，只在用户本来仍处于贴底状态时自动贴底，并将消息列表改为直接滚动，避免多套滚动动画重叠 / 预防措施：任何消息列表滚动修复都要同时检查“补页定位”“自动贴底判定”和“CSS 滚动动画”三层，避免只修其中一层后留下新型跳动

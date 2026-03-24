@@ -2366,6 +2366,7 @@ async function loadOlderHistory() {
   const targetBefore = state.nextBefore;
   state.loadingHistory = true;
   const previousHeight = messageListEl.scrollHeight;
+  const previousTop = messageListEl.scrollTop;
 
   try {
     const data = await apiGet(`/api/openclaw-webchat/agents/${encodeURIComponent(targetAgentId)}/history?limit=30&before=${encodeURIComponent(targetBefore)}`);
@@ -2376,7 +2377,7 @@ async function loadOlderHistory() {
     state.hasMore = Boolean(data.hasMore);
     renderMessages();
     const nextHeight = messageListEl.scrollHeight;
-    messageListEl.scrollTop = Math.max(0, nextHeight - previousHeight);
+    messageListEl.scrollTop = Math.max(0, previousTop + (nextHeight - previousHeight));
   } finally {
     state.loadingHistory = false;
   }
@@ -4122,7 +4123,7 @@ function maybeScrollMessagesToBottom(force = false) {
 
 function shouldKeepConversationPinnedAfterRender() {
   if (state.historySearchActiveMessageId) return false;
-  return state.autoScrollPinned || isActiveSessionBusy();
+  return state.autoScrollPinned;
 }
 
 function scheduleConversationPinnedBottomSync() {

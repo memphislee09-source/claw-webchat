@@ -114,6 +114,9 @@ async function checkPageShell() {
   assert(appJs.includes('function renderMarkdownBlock'), 'app.js should include markdown bubble rendering');
   assert(appJs.includes("bubble.classList.add('visual-media-bubble')"), 'app.js should include responsive visual media bubble branch');
   assert(appJs.includes('groupMessageBlocksForRender'), 'app.js should include shared block render grouping');
+  assert(appJs.includes('const previousTop = messageListEl.scrollTop;'), 'app.js should preserve pre-load scroll offset when prepending history');
+  assert(appJs.includes('previousTop + (nextHeight - previousHeight)'), 'app.js should restore scroll position relative to prepended history height');
+  assert(appJs.includes('return state.autoScrollPinned;'), 'app.js should not force bottom stickiness solely because the active session is busy');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
   assert(css.includes('.command-menu'), 'styles.css should include slash command menu styles');
@@ -129,6 +132,7 @@ async function checkPageShell() {
   assert(css.includes('.history-search-highlight'), 'styles.css should include history search keyword highlight styles');
   assert(css.includes('.message-row.search-target .message-bubble'), 'styles.css should include search target highlight styles');
   assert(css.includes('.message-list.showing-history-target > :first-child'), 'styles.css should disable bottom anchoring when showing a history target');
+  assert(css.includes('scroll-behavior: auto;'), 'styles.css should keep the message list on direct scroll behavior to avoid overlapping scroll animations');
   assert(css.includes('.command-item'), 'styles.css should include slash command item styles');
   assert(css.includes('.model-picker'), 'styles.css should include model picker overlay styles');
   assert(css.includes('.model-picker-card'), 'styles.css should include model picker card styles');

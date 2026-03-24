@@ -841,7 +841,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   overscroll-behavior: contain;
 }
 
