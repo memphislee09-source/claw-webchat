@@ -899,7 +899,7 @@ function renderLocalizedChrome() {
   if (serviceRestartGateEl?.querySelector('.eyebrow')) serviceRestartGateEl.querySelector('.eyebrow').textContent = t('ui.serviceRestart');
   if (serviceRestartGateEl?.querySelector('h2')) serviceRestartGateEl.querySelector('h2').textContent = t('ui.serviceRestarting');
   if (mediaZoomOutButtonEl) mediaZoomOutButtonEl.setAttribute('aria-label', t('ui.zoomOut'));
-  if (mediaResetZoomButtonEl) mediaResetZoomButtonEl.setAttribute('aria-label', t('ui.resetZoom'));
+  renderMediaViewerZoomReadout();
   if (mediaZoomInButtonEl) mediaZoomInButtonEl.setAttribute('aria-label', t('ui.zoomIn'));
   if (mediaViewerImageEl && !state.mediaViewerOpen) mediaViewerImageEl.alt = t('ui.imagePreview');
   if (modelPickerEl) modelPickerEl.setAttribute('aria-label', t('ui.modelPicker'));
@@ -3491,6 +3491,18 @@ function adjustMediaViewerScale(delta) {
   setMediaViewerScale(state.mediaViewerScale + delta);
 }
 
+function formatMediaViewerScaleLabel() {
+  return `${Math.round(state.mediaViewerScale * 100)}%`;
+}
+
+function renderMediaViewerZoomReadout() {
+  if (!mediaResetZoomButtonEl) return;
+  const zoomLabel = formatMediaViewerScaleLabel();
+  mediaResetZoomButtonEl.textContent = zoomLabel;
+  mediaResetZoomButtonEl.setAttribute('aria-label', `${t('ui.resetZoom')} (${zoomLabel})`);
+  mediaResetZoomButtonEl.setAttribute('title', t('ui.resetZoom'));
+}
+
 function setMediaViewerScale(nextScale) {
   state.mediaViewerScale = Math.min(4, Math.max(0.6, Number(nextScale) || 1));
   if (state.mediaViewerScale <= 1) {
@@ -3504,6 +3516,7 @@ function applyMediaViewerTransform() {
   mediaViewerImageEl.style.transform = `translate(${state.mediaViewerOffsetX}px, ${state.mediaViewerOffsetY}px) scale(${state.mediaViewerScale})`;
   mediaViewerImageEl.classList.toggle('is-draggable', state.mediaViewerScale > 1);
   mediaViewerImageEl.classList.toggle('is-dragging', state.mediaViewerDragging);
+  renderMediaViewerZoomReadout();
 }
 
 function handleMediaViewerImageClick(event) {

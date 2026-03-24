@@ -2,18 +2,18 @@
 
 ## 读取顺序
 1. 先读本文件
-2. 再读 `docs/HANDOFF-2026-03-22.md`
+2. 再读 `docs/HANDOFF-2026-03-24.md`
 3. 需要补背景时再读 `docs/ARCHITECTURE.md`、`docs/ROADMAP.md`、`docs/error.md`
 
 ## 项目概览
 - 项目名：`openclaw-webchat`
-- 当前版本：`0.1.4`（manifest: `0.1.4`）
+- 当前版本：`0.1.5`（manifest: `0.1.5`）
 - 当前主线：`main`
 - 仓库地址：`https://github.com/memphislee09-source/openclaw-webchat`
 - 项目目标：构建独立于默认 WebUI 的 OpenClaw WebChat，强化历史保留、富媒体体验和多会话稳定性
 
 ## 当前基线
-- `0.1.4` 已合入 `main`，后续统一以主线为开发基点
+- `0.1.5` 已合入 `main`，后续统一以主线为开发基点
 - 当前运行方式支持用户级 LaunchAgent `ai.openclaw.webchat` 常驻拉起
 - 当前主线已包含：
   - slash 命令按钮、本地命令菜单与本地执行语义
@@ -48,9 +48,10 @@
   - 视频消息在未播放前会显示缩略预览层，至少可见首帧或视频标题/播放提示
   - 输入框“发送”已改为图标按钮；当前 agent 处理中时会切换为停止图标，可直接停止该 agent 当前任务
   - session 级停止接口已接入 gateway `chat.abort`，并同步拦截本地等待态与迟到补回链路
+  - 图片查看器右上角缩放读数会跟随真实缩放比例动态刷新，不再固定显示 `1:1`
   - 已补公开发布资料第一套：README 首页重写、公开发布 checklist、GitHub issue/PR 模板增强、截图归档与两套 agent 安装指南
   - 已新增 release bundle 打包脚本，可生成 GitHub Release 用的整合安装包与 SHA256 校验文件
-  - 本地 `selftest` 已在当前实例恢复并重新跑通
+  - `selftest` 脚本仍保留为本地集成烟测入口；当前实例已确认 `npm run check` 通过，但 `selftest` 仍存在 `sessionKey` 前缀断言与历史绑定数据不一致的已知问题
 
 ## 已完成能力
 - 独立命名空间与 API：`/api/openclaw-webchat/*`
@@ -80,6 +81,7 @@
 - 当前 agent 已支持通过 `/model` 弹窗查看当前模型、浏览可用模型列表并直接切换模型
 - 聊天区头像尺寸与左栏保持一致，视频消息支持未播放前预览，处理中阶段的贴底体验已补稳
 - 输入框发送按钮已切换为发送/停止双态图标按钮，可在当前 agent 处理中直接停止本轮任务
+- 图片查看器全屏模式已支持随真实缩放动态更新右上角读数
 - 公开发布准备资料已落地：截图、README 首页、issue/PR 模板、bundle / network 两套 agent 安装说明
 
 ## 关键文件
@@ -88,10 +90,10 @@
 - `public/message-blocks.js`：共享消息 block 解析与顺序分组
 - `public/styles.css`：布局、气泡、媒体、移动端与设置页样式
 - `scripts/selftest.mjs`：本地回归脚本
-- `docs/HANDOFF-2026-03-22.md`：当前交接摘要
+- `docs/HANDOFF-2026-03-24.md`：当前交接摘要
 
 ## 最近主线变更
-- 工作区当前待提交：发送/停止双态图标按钮、session 级 stop 接口、`chat.abort` 接入、自测补强与文档同步
+- `0.1.5` 已收口并准备同步到 GitHub：历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布文档与图片查看器缩放读数修复均已纳入当前版本
 - `f27a1d4` `feat: add theme preset variants`
 - `dcfbe64` `feat: add light theme toggle`
 - `932bdcd` `docs: record avatar persistence fix`
@@ -104,7 +106,8 @@
   - `codex/mobile-history-test`
 
 ## 已知重点
-- 2026-03-19 `0.1.4` 已将公开化文档、访问与安全设置、轻认证、服务内重启、设置页结构整理与中英文界面切换一起并入 `main`
+- 2026-03-24 `0.1.5` 已将历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布准备资料和图片查看器缩放读数修复一起并入 `main`
+- 当前本机 `selftest` 仍卡在 `openclaw-webchat:*` 与历史 `claw-webchat:*` sessionKey 前缀不一致上，需后续单独收口
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题
 - 2026-03-22 已补上当前 agent 级模型切换弹窗：无参 `/model` / `/models` 会弹出可用模型列表，点击后直接切换当前 agent 的上游 session 模型

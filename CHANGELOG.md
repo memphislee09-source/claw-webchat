@@ -6,6 +6,8 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-03-24
+
 ### Added
 - Add history search phase 2 first slice with date filters, `20 / 50 / 100` result limits, and stronger query matching for the current agent timeline
 - Add an agent-scoped `/model` picker modal that shows the current model plus available `provider/model` choices and switches the current upstream session directly
@@ -25,6 +27,7 @@ The format is intentionally lightweight and follows a simple versioned release l
 - Keep message avatars visually aligned with the sidebar avatar size
 - Show a visible preview layer for videos before playback starts so users can identify the clip before pressing play
 - Prevent stopped runs from continuing through late-reply reconciliation or from slipping through after attachment preparation has already begun
+- Keep the fullscreen image viewer zoom readout in sync with the actual wheel-zoom scale instead of leaving the reset button stuck at `1:1`
 
 ## [0.1.4] - 2026-03-19
 

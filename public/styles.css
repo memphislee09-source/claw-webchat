@@ -1625,6 +1625,13 @@ button {
   border-color: var(--line-strong);
 }
 
+#mediaResetZoomButton.media-viewer-button {
+  width: auto;
+  min-width: 64px;
+  padding: 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .media-viewer-image {
   max-width: min(92vw, 1400px);
   max-height: 88vh;
