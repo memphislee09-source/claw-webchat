@@ -10,3 +10,4 @@
 - For promo-video narration edits, confirm that the final CTA line still has dedicated audio time and a dedicated closing visual; do not let it disappear by folding it into a preceding feature scene.
 - For GitHub repo-homepage media updates, distinguish between a downloadable repository video file and a homepage-visible embedded video; use a `github.com/user-attachments/assets/...` URL when the user wants the video visible directly in the README page.
 - For reusable tool-operation docs, default to the shared `/Users/memphis/Library/Mobile Documents/com~apple~CloudDocs/dev` archive instead of putting them inside a specific project repo unless the docs are truly project-bound.
+- After modifying files under the shared `dev` archive, sync the dedicated `memphis-dev-docs` repo in the same turn unless the user explicitly says not to.

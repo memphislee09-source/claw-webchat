@@ -62,6 +62,9 @@
 - [x] Verify and sync the new tools docs to GitHub
 - [x] Move non-project-specific tool docs out of the repo into the shared iCloud dev docs folder
 - [x] Remove the repo-local `tools/` directory and sync the cleanup to GitHub
+- [x] Create a private GitHub repo for the shared iCloud `dev` directory
+- [x] Initialize and sync the entire `dev` directory to the new GitHub repo
+- [x] Confirm the shared `dev` repo sync baseline for future updates
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -288,3 +291,12 @@
     there without being tied to the project repository.
   - Removed the repo-local `tools/` directory from `main` and synced the cleanup on commit `6818771`
     (`docs: move shared tools docs out of repo`).
+- Shared `dev` repo bootstrap:
+  - Created the private GitHub repo `memphis-dev-docs` for the entire shared iCloud dev archive.
+  - Initialized `/Users/memphis/Library/Mobile Documents/com~apple~CloudDocs/dev` as a standalone git
+    repository on branch `main`, with remote:
+    `https://github.com/memphislee09-source/memphis-dev-docs.git`
+  - Added a root `README.md` plus `.gitignore`, then pushed the initial baseline.
+  - Added a workflow note in the dev repo root README that any edits under the `dev` directory should be
+    followed by `git add -A`, `git commit`, and `git push`.
+  - Verified the new repo is private, tracks `origin/main`, and currently has clean git status after sync.
