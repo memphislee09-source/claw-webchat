@@ -3306,8 +3306,9 @@ function renderModelPicker() {
     || state.modelPickerNotice
     || (state.modelPickerCurrent?.available === false ? t('text.modelPickerCurrentMissing') : '')
     || (state.modelPickerSwitchingLabel ? t('status.switchingModel', { model: state.modelPickerSwitchingLabel }) : '')
-    || (state.modelPickerLoading ? t('status.loadingModelOptions') : t('text.modelPickerIntro'));
+    || (state.modelPickerLoading ? t('status.loadingModelOptions') : '');
   modelPickerMessageEl.textContent = message;
+  modelPickerMessageEl.hidden = !message;
   modelPickerMessageEl.classList.toggle('error', Boolean(state.modelPickerError));
 
   if (closeModelPickerButtonEl) {

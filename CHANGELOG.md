@@ -6,6 +6,9 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+### Fixed
+- Remove the duplicate idle-state helper copy from the `/model` picker modal so the introductory explanation is shown only once while no loading, success, or error message is active
+
 ## [0.1.6] - 2026-03-24
 
 ### Changed

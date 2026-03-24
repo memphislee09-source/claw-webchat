@@ -32,6 +32,10 @@
 - [x] Mirror the `/model` picker responsiveness improvements onto the thinking (`T`) menu
 - [x] Keep the thinking menu open after a successful level switch so the user can confirm the result
 - [x] Verify the updated thinking menu behavior with checks
+- [x] Remove the duplicate `/model` picker intro copy from the modal body
+- [x] Update task/docs records for the `/model` picker copy follow-up
+- [x] Verify the follow-up with `npm run check`
+- [ ] Commit and push the `/model` picker copy follow-up to GitHub
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -159,3 +163,10 @@
     inside the menu, instead of closing immediately after the PATCH succeeds.
   - Existing background refresh hooks for `/think`, `/model`, `/new`, `/reset`, and model-button
     switches are preserved, so the cached menu payload stays aligned with upstream session state.
+- `/model` picker copy follow-up:
+  - The modal previously showed the same introductory sentence twice while idle: once in the fixed
+    header copy and once again in the lower status/message area.
+  - `renderModelPicker()` now leaves the lower message area empty when there is no loading state,
+    success notice, warning, or error to show, so the top explanatory copy remains the only intro.
+  - Synced the follow-up into `CHANGELOG.md`, `status.md`, and `docs/HANDOFF-2026-03-24.md`.
+  - Verification passed: `npm run check`.
