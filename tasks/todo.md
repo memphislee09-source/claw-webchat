@@ -52,6 +52,8 @@
 - [x] Re-render and verify the final seconds of the promo video after the CTA restore
 - [x] Replace the README screenshot section with the new promo video entry
 - [x] Verify the README now points to the tracked promo video artifact instead of static screenshots
+- [ ] Switch the README demo section from a local video link to a homepage-visible GitHub attachment embed
+- [ ] Push the README embed update to GitHub and verify the new mainline commit
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,

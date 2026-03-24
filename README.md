@@ -23,9 +23,9 @@ A standalone WebChat for agent workflows on top of an existing OpenClaw runtime,
 - Use a send/stop dual-state composer button so the current agent task can be aborted directly from the input area
 
 ## Demo Video
-- GitHub repository pages open this local MP4 as a player/download target when clicked.
-- Play from the repository: [docs/media/claw-webchat-promo-v4.mp4](docs/media/claw-webchat-promo-v4.mp4)
-- Download the current promo video: [claw-webchat-promo-v4.mp4](docs/media/claw-webchat-promo-v4.mp4)
+https://github.com/user-attachments/assets/53a40759-4889-41bf-9399-a3f3daf5bdaf
+
+- Download the repository copy: [claw-webchat-promo-v4.mp4](docs/media/claw-webchat-promo-v4.mp4)
 
 ## Installation Options
 
