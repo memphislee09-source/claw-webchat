@@ -40,6 +40,10 @@
 - [x] Tighten bundle/network agent install guides so both are step-by-step with checks and low-capability fallback
 - [x] Update public release docs/checklist to reflect the stronger install-doc requirement
 - [x] Verify the doc-only follow-up and sync it to GitHub
+- [x] Build the `0.1.6` release bundle artifact
+- [x] Verify the release bundle archive and checksum contents
+- [x] Create the first GitHub Release with downloadable bundle assets
+- [x] Record the release result and sync it to GitHub
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -187,3 +191,15 @@
     the public repo now states this install-doc standard explicitly.
   - Verification passed: `npm run check`.
   - Synced to GitHub on `main` with commit `dfa3089` (`docs: tighten public install guides`).
+- First public GitHub Release follow-up:
+  - Built the release bundle with `npm run bundle`, producing `dist/claw-webchat-v0.1.6-bundle.tar.gz`
+    and `dist/claw-webchat-v0.1.6-bundle.sha256`.
+  - Verified the archive root layout and confirmed the bundle contains `package.json`, `src/`,
+    `public/`, `docs/`, and `scripts/`.
+  - Published the first non-draft GitHub Release as `v0.1.6`, targeting commit `be4be55`, with
+    both downloadable assets attached.
+  - Release URL: `https://github.com/memphislee09-source/claw-webchat/releases/tag/v0.1.6`
+  - Bundle download URL:
+    `https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.tar.gz`
+  - Checksum download URL:
+    `https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.sha256`
