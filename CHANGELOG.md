@@ -6,6 +6,9 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+### Changed
+- Rename the display-facing product branding to `Claw WebChat` across the UI and public-facing docs while keeping backend identifiers, API paths, environment variables, and repository coordinates unchanged
+
 ### Fixed
 - Normalize stored `sessionKey` values to the `openclaw-webchat:*` prefix while still accepting legacy `claw-webchat:*` requests, so local selftest and existing browser sessions stay aligned
 

@@ -1,6 +1,6 @@
 # Public Release Checklist
 
-Use this checklist before recommending `openclaw-webchat` in the OpenClaw community.
+Use this checklist before recommending Claw WebChat in the OpenClaw community.
 
 ## 1. Product Readiness
 - [ ] Confirm the release target commit is on `main`

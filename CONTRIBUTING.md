@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for considering a contribution to `openclaw-webchat`.
+Thanks for considering a contribution to Claw WebChat.
 
 This project is still in an alpha stage, so small, well-scoped, reviewable changes are strongly preferred over wide refactors.
 
