@@ -6,17 +6,15 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-03-24
+
 ### Changed
-- Rename the display-facing product branding to `Claw WebChat` across the UI and public-facing docs while keeping backend identifiers, API paths, environment variables, and repository coordinates unchanged
-- Refresh the hidden Claw WebChat bootstrap so agents get a shorter but stricter media contract for local files and direct remote `http/https` media URLs
-- Widen the regular desktop image/video cap from `420px` to `70vw` while keeping the existing mixed-media bubble gating logic intact
-- Add a composer-side thinking control with a model-aware popup and a dynamic `T:*` badge that reflects the current session thinking level, then tone the badge typography down so it reads as tool chrome instead of a primary action
+- Keep the `/model` picker open after a successful switch, reduce each row to a single-line label, and make the picker list reliably scroll so the final models are not visually clipped
+- Mirror the same warm-reopen and post-switch confirmation behavior onto the composer-side `T:*` thinking menu, so repeated opens are faster and successful level switches stay visible until the user dismisses the menu
 
 ### Fixed
-- Normalize stored `sessionKey` values to the `openclaw-webchat:*` prefix while still accepting legacy `claw-webchat:*` requests, so local selftest and existing browser sessions stay aligned
-- Steer agents away from the unsupported `message` / `webchat` channel send path so generated local media and referenced remote media render correctly inside Claw WebChat without per-agent manual reminders
-- Preserve the right-side conversation viewport when older history is prepended, stop forcing bottom pinning just because the active agent is busy, and remove overlapping smooth-scroll behavior that made manual scrolling jumpy
-- Show the current app version in Settings → About by sourcing it from `package.json` through the settings API
+- Stop truncating no-argument `/model` output to a top-10 slice by summarizing the full available model catalog by provider, which keeps models such as `gpt-5.4` visible in the slash response
+- Cache short-lived `models.list` and `sessions.list` gateway results so `/model` and the model picker no longer shell out twice on every open, closing much of the responsiveness gap versus the native OpenClaw Web UI
 
 ## [0.1.5] - 2026-03-24
 
@@ -27,6 +25,10 @@ The format is intentionally lightweight and follows a simple versioned release l
 - Add a release bundle build script plus agent-oriented install guides for bundle and network installation flows
 
 ### Changed
+- Rename the display-facing product branding to `Claw WebChat` across the UI and public-facing docs while keeping backend identifiers, API paths, environment variables, and repository coordinates unchanged
+- Refresh the hidden Claw WebChat bootstrap so agents get a shorter but stricter media contract for local files and direct remote `http/https` media URLs
+- Widen the regular desktop image/video cap from `420px` to `70vw` while keeping the existing mixed-media bubble gating logic intact
+- Add a composer-side thinking control with a model-aware popup and a dynamic `T:*` badge that reflects the current session thinking level, then tone the badge typography down so it reads as tool chrome instead of a primary action
 - Improve search-result highlighting and search panel metadata so active date/limit filters stay visible
 - Change no-argument `/model` and `/models` from a plain text status reply into a model-switching modal workflow for the current agent
 - Keep the current conversation pinned to the bottom more reliably while the agent is still processing after a user send
@@ -34,6 +36,10 @@ The format is intentionally lightweight and follows a simple versioned release l
 - Rewrite the README homepage for public release prep, including screenshots, install entry points, and a publish checklist
 
 ### Fixed
+- Normalize stored `sessionKey` values to the `openclaw-webchat:*` prefix while still accepting legacy `claw-webchat:*` requests, so local selftest and existing browser sessions stay aligned
+- Steer agents away from the unsupported `message` / `webchat` channel send path so generated local media and referenced remote media render correctly inside Claw WebChat without per-agent manual reminders
+- Preserve the right-side conversation viewport when older history is prepended, stop forcing bottom pinning just because the active agent is busy, and remove overlapping smooth-scroll behavior that made manual scrolling jumpy
+- Show the current app version in Settings → About by sourcing it from `package.json` through the settings API
 - Make gateway CLI parsing resilient when plugin diagnostics are printed before JSON output, restoring slash-command stability for `/model`, `/think`, and related upstream queries
 - Restore full local selftest coverage after `memory-lancedb-pro` installation by recording plugin install provenance in the local OpenClaw config
 - Keep message avatars visually aligned with the sidebar avatar size

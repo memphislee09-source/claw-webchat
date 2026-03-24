@@ -26,12 +26,18 @@
 - [x] Add a composer-side `T` button for the current agent thinking level
 - [x] Expose a dedicated thinking-options/settings API for the current session
 - [x] Verify the thinking picker flow with `npm run check` and `npm run selftest`
+- [x] Investigate why `/model` and the model picker miss some models such as `gpt-5.4`
+- [x] Investigate why `/model` and the model picker respond more slowly than the native OpenClaw Web UI
+- [x] Implement and verify a fix for model list completeness and responsiveness
+- [x] Mirror the `/model` picker responsiveness improvements onto the thinking (`T`) menu
+- [x] Keep the thinking menu open after a successful level switch so the user can confirm the result
+- [x] Verify the updated thinking menu behavior with checks
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
   `docs/error.md`, `docs/REQUIREMENTS.md`, `docs/SECURITY_MODEL.md`, `docs/PROJECT_CHARTER.md`,
   `README.md`, and `package.json`.
-- Current baseline is `main` at `0.1.5`; user-visible branding is `Claw WebChat`, while backend
+- Current baseline is `main` at `0.1.6`; user-visible branding is `Claw WebChat`, while backend
   technical identifiers intentionally remain `openclaw-webchat`.
 - Current architecture remains a lightweight Node/Express adapter plus static frontend, with local
   JSONL history, per-agent session binding, media proxy/signing, and a narrow OpenClaw gateway
@@ -123,3 +129,33 @@
     models.
   - Verification passed: `npm run check`, LaunchAgent restart, `http://127.0.0.1:3770/healthz`,
     and `npm run selftest`.
+- `/model` completeness + responsiveness follow-up:
+  - Direct upstream probing confirmed that OpenClaw `models.list` already included `gpt-5.4`, so
+    the missing-model complaint was not caused by the upstream runtime dropping that model.
+  - The main latency cause was local: every `/model` open in Claw WebChat shelled out to the
+    OpenClaw CLI twice (`sessions.list` + `models.list`) with no cache, which made the picker
+    materially slower than the native OpenClaw Web UI.
+  - Added short-lived in-memory caches for `models.list` and `sessions.list`, with automatic
+    session-cache invalidation after `sessions.patch`, `sessions.reset`, and `sessions.compact`.
+  - The model picker now reuses the most recent session payload for an instant reopen and silently
+    refreshes only when that cached payload has gone stale.
+  - `/model` list output was changed from a fixed top-10 truncation to a provider-grouped full
+    summary, which keeps token usage compact while ensuring models like `gpt-5.4` are not hidden.
+  - Follow-up reproduction across Athena and other agents showed that the data layer always still
+    contained `gpt-5.4`; the remaining completeness issue was in the modal layout, where the
+    model-picker card used a capped grid container without reserving a `1fr` row for the scroll
+    region, so bottom options could be visually clipped instead of scrolling.
+  - Fixed the picker layout by reserving the last grid row as `minmax(0, 1fr)` and constraining
+    `.model-picker-list` to its own scroll box, so the last models remain reachable regardless of
+    current model choice, viewport height, or browser zoom.
+  - Verification passed: `npm run check`, LaunchAgent restart, `npm run selftest`, live `/model`
+    response inspection showing `gpt-5.4`, and live `/model-options` timings improving from about
+    `2533.8ms` on the first cold request to about `0.5–1.2ms` on warm repeats.
+- Thinking menu follow-up:
+  - Mirrored the model-picker warm-reopen pattern onto the `T` menu with a short-lived client-side
+    cache for the current session’s thinking payload, so repeated opens do not blank the menu and
+    wait for a network round-trip when the session/model has not changed.
+  - Successful thinking-level changes now keep the menu open and show a visible success notice
+    inside the menu, instead of closing immediately after the PATCH succeeds.
+  - Existing background refresh hooks for `/think`, `/model`, `/new`, `/reset`, and model-button
+    switches are preserved, so the cached menu payload stays aligned with upstream session state.

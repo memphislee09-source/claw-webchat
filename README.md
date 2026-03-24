@@ -5,7 +5,7 @@ A standalone WebChat for agent workflows on top of an existing OpenClaw runtime,
 `Claw WebChat` 是一个独立于 OpenClaw 默认 WebUI 的 WebChat 项目，目标是在不深度耦合官方前端实现的前提下，提供更稳定的历史保留、富媒体体验和多会话隔离能力。
 
 ## At A Glance
-- Current version: `0.1.5`
+- Current version: `0.1.6`
 - Stability: `alpha`, but already usable for local-first personal workflows
 - Default branch: `main`
 - Recommended deployment: local machine or private network behind Tailscale / equivalent access control
@@ -76,8 +76,8 @@ curl http://127.0.0.1:3770/healthz
 - Rich media parsing with structured blocks plus `MEDIA:` / `mediaUrl:` fallbacks
 - Search within the current agent timeline with jump-to-hit and keyword highlight
 - History search with date filters, larger result sets, and stronger matching
-- Agent-scoped model picker for `/model` / `/models`, including current-model summary and direct model switching
-- Composer-side thinking quick switch with a dynamic `T:*` badge and model-aware thinking-level options for the current session
+- Agent-scoped model picker for `/model` / `/models`, including a complete provider-grouped model list, faster warm reopen, and direct model switching
+- Composer-side thinking quick switch with a dynamic `T:*` badge, faster warm reopen, model-aware thinking-level options, and in-menu success confirmation for the current session
 - Composer send/stop dual-state button wired to gateway `chat.abort` for the current agent session
 - Chat polish for consistent avatar sizing, steadier pinned-bottom behavior while agents are processing, and visible pre-play video previews
 - Responsive layout for desktop, tablet, and mobile drawer navigation
@@ -115,8 +115,8 @@ The settings UI includes:
 - an interface language switch with Simplified Chinese and English
 - access mode switching between local-only and LAN / Tailscale-friendly binding
 - optional light authentication for shared LAN-style access
-- an agent-scoped `/model` picker that can switch the current upstream session model directly
-- a composer-side `T:*` thinking control that reflects the current session thinking level and switches it without typing `/think`
+- an agent-scoped `/model` picker that can switch the current upstream session model directly, stays open after a successful switch, and no longer hides the last models in the list
+- a composer-side `T:*` thinking control that reflects the current session thinking level, reopens faster, and stays open after a successful switch so the user can confirm the result
 - a send icon in the composer that flips to a stop icon while the current agent is processing, and stops the current run when clicked
 - an About section with project summary, current version, and GitHub link
 - a Manual Start section with install, start, and restart command hints

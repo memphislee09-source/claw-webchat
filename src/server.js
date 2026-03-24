@@ -43,9 +43,11 @@ const WHISPER_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_WHISPER_TIMEOUT_M
 const UPLOAD_SOURCE_PREFIX = 'openclaw-upload:';
 const AUTH_COOKIE_NAME = 'openclaw_webchat_auth';
 const AUTH_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MODEL_CATALOG_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_MODEL_CATALOG_CACHE_TTL_MS || 30000);
+const SESSION_STATE_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_STATE_CACHE_TTL_MS || 2500);
 const PROJECT_GITHUB_URL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_GITHUB_URL)
   || 'https://github.com/memphislee09-source/claw-webchat';
-const PROJECT_VERSION = normalizeOptionalString(PACKAGE_JSON?.version) || '0.1.5';
+const PROJECT_VERSION = normalizeOptionalString(PACKAGE_JSON?.version) || '0.1.6';
 const RESTART_LABEL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_LAUNCHD_LABEL)
   || normalizeOptionalString(process.env.XPC_SERVICE_NAME)
   || 'ai.openclaw.webchat';
@@ -54,6 +56,8 @@ const authSessions = new Map();
 const activeTurnControllers = new Map();
 const stoppedTurnStates = new Map();
 const ABORTED_ASSISTANT_REPLY = Symbol('openclaw-webchat-aborted-assistant-reply');
+const gatewayModelsCache = { value: null, expiresAt: 0, promise: null };
+const gatewaySessionsCache = { value: null, expiresAt: 0, promise: null };
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -893,14 +897,15 @@ async function runModelSlashCommand(binding, command, commandName, args) {
   try {
     modelState = await loadModelCommandState(binding.upstreamSessionKey);
     const currentModel = modelState.current?.label || modelState.current?.model || 'default';
-    const available = modelState.models.slice(0, 10).map((item) => item.label);
 
     if (!mode || normalizedMode === 'list' || commandName === '/models') {
       const lines = [`当前模型：${currentModel}`];
-      if (available.length) {
-        lines.push(`可用模型：${available.join(', ')}${modelState.models.length > available.length ? ` +${modelState.models.length - available.length} more` : ''}`);
+      const availableLines = summarizeModelCatalog(modelState.models);
+      if (availableLines.length) {
+        lines.push('可用模型：');
+        lines.push(...availableLines);
       }
-      lines.push('提示：发送 /model <name> 切换模型。');
+      lines.push('提示：发送 /model provider/model 或 /model <name> 切换模型。');
       return buildAssistantSlashResponse(binding, command, lines.join('\n'));
     }
 
@@ -1187,7 +1192,7 @@ async function loadUpstreamSessionRow(sessionKey) {
 }
 
 async function loadUpstreamSessionState(sessionKey) {
-  const payload = await gatewayCall('sessions.list', {});
+  const payload = await loadCachedGatewaySessions();
   const rows = Array.isArray(payload?.sessions) ? payload.sessions : [];
   return {
     session: rows.find((item) => item?.key === sessionKey) || null,
@@ -1198,7 +1203,7 @@ async function loadUpstreamSessionState(sessionKey) {
 async function loadThinkingCommandState(sessionKey) {
   const [sessionState, modelsInfo] = await Promise.all([
     loadUpstreamSessionState(sessionKey),
-    gatewayCall('models.list', {})
+    loadCachedGatewayModels()
   ]);
   return {
     session: sessionState.session,
@@ -1209,7 +1214,7 @@ async function loadThinkingCommandState(sessionKey) {
 async function loadModelCommandState(sessionKey) {
   const [sessionState, modelsInfo] = await Promise.all([
     loadUpstreamSessionState(sessionKey),
-    gatewayCall('models.list', {})
+    loadCachedGatewayModels()
   ]);
   const models = presentModelCatalog(modelsInfo?.models);
   return {
@@ -1244,6 +1249,24 @@ function presentModelCatalog(models) {
   }
 
   return out.sort((left, right) => left.label.localeCompare(right.label, 'en'));
+}
+
+function summarizeModelCatalog(models) {
+  const groups = new Map();
+  const rows = Array.isArray(models) ? models : [];
+
+  for (const item of rows) {
+    const provider = normalizeOptionalString(item?.provider) || 'default';
+    const model = normalizeOptionalString(item?.model);
+    if (!model) continue;
+    const group = groups.get(provider) || [];
+    group.push(model);
+    groups.set(provider, group);
+  }
+
+  return [...groups.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0], 'en'))
+    .map(([provider, entries]) => `- ${provider}: ${entries.join(', ')}`);
 }
 
 function resolveCurrentModelDescriptor(sessionState, models = []) {
@@ -2279,9 +2302,61 @@ async function gatewayCall(method, params) {
   const raw = String(stdout || '').trim() || '{}';
   const parsed = parseGatewayJsonOutput(raw);
   if (parsed !== null) {
+    invalidateGatewayCachesForMethod(method);
     return parsed;
   }
   throw new Error(`gateway ${method} returned non-JSON: ${stderr || raw.slice(0, 300)}`);
+}
+
+async function loadCachedGatewayModels({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && gatewayModelsCache.value && gatewayModelsCache.expiresAt > now) {
+    return gatewayModelsCache.value;
+  }
+  if (!force && gatewayModelsCache.promise) {
+    return gatewayModelsCache.promise;
+  }
+
+  gatewayModelsCache.promise = gatewayCall('models.list', {})
+    .then((payload) => {
+      gatewayModelsCache.value = payload;
+      gatewayModelsCache.expiresAt = Date.now() + MODEL_CATALOG_CACHE_TTL_MS;
+      return payload;
+    })
+    .finally(() => {
+      gatewayModelsCache.promise = null;
+    });
+
+  return gatewayModelsCache.promise;
+}
+
+async function loadCachedGatewaySessions({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && gatewaySessionsCache.value && gatewaySessionsCache.expiresAt > now) {
+    return gatewaySessionsCache.value;
+  }
+  if (!force && gatewaySessionsCache.promise) {
+    return gatewaySessionsCache.promise;
+  }
+
+  gatewaySessionsCache.promise = gatewayCall('sessions.list', {})
+    .then((payload) => {
+      gatewaySessionsCache.value = payload;
+      gatewaySessionsCache.expiresAt = Date.now() + SESSION_STATE_CACHE_TTL_MS;
+      return payload;
+    })
+    .finally(() => {
+      gatewaySessionsCache.promise = null;
+    });
+
+  return gatewaySessionsCache.promise;
+}
+
+function invalidateGatewayCachesForMethod(method) {
+  if (method === 'sessions.patch' || method === 'sessions.reset' || method === 'sessions.compact') {
+    gatewaySessionsCache.value = null;
+    gatewaySessionsCache.expiresAt = 0;
+  }
 }
 
 function parseGatewayJsonOutput(raw) {

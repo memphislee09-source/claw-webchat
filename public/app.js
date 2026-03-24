@@ -7,6 +7,8 @@ const LANGUAGE_STORAGE_KEY = 'openclaw-webchat-language';
 const HISTORY_SEARCH_RECENTS_STORAGE_KEY = 'openclaw-webchat-history-search-recents';
 const HISTORY_SEARCH_MAX_RECENTS = 8;
 const DEFAULT_HISTORY_SEARCH_LIMIT = 50;
+const MODEL_PICKER_CACHE_TTL_MS = 15000;
+const THINKING_PICKER_CACHE_TTL_MS = 15000;
 const SETTINGS_SECTIONS = ['contacts', 'preferences', 'access', 'about', 'manual-start'];
 const SUPPORTED_LANGUAGES = ['zh-CN', 'en'];
 const THEME_PRESETS = {
@@ -539,16 +541,24 @@ const state = {
   modelPickerOpen: false,
   modelPickerLoading: false,
   modelPickerError: '',
+  modelPickerNotice: '',
   modelPickerCurrent: null,
   modelPickerOptions: [],
   modelPickerSwitchingLabel: '',
+  modelPickerLoadedSessionKey: '',
+  modelPickerLoadedAt: 0,
+  modelPickerRequestId: 0,
   thinkingPickerOpen: false,
   thinkingPickerLoading: false,
   thinkingPickerError: '',
+  thinkingPickerNotice: '',
   thinkingPickerCurrentLevel: '',
   thinkingPickerOptions: [],
   thinkingPickerSwitchingLevel: '',
   thinkingPickerModelLabel: '',
+  thinkingPickerLoadedSessionKey: '',
+  thinkingPickerLoadedAt: 0,
+  thinkingPickerRequestId: 0,
   historySearchOpen: false,
   historySearchQuery: '',
   historySearchResults: [],
@@ -1530,6 +1540,9 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
     if (requestId !== state.openRequestId || state.activeAgentId !== agentId) return;
     state.activeSessionKey = response.sessionKey;
     await refreshThinkingButtonState({ sessionKey: response.sessionKey, silent: true });
+    if (!forceReload) {
+      void refreshModelPickerState({ sessionKey: response.sessionKey, silent: true, showLoading: false });
+    }
     state.messages = Array.isArray(response.history?.messages) ? response.history.messages : [];
     state.nextBefore = response.history?.nextBefore || null;
     state.hasMore = Boolean(response.history?.hasMore);
@@ -2768,6 +2781,10 @@ async function executeSlashCommand(command) {
     if (isOperationContextActive(context) && shouldRefreshThinkingStateForCommand(command)) {
       await refreshThinkingButtonState({ sessionKey: targetSessionKey, silent: true });
     }
+    if (isOperationContextActive(context) && shouldRefreshModelStateForCommand(command)) {
+      markModelPickerPayloadStale(targetSessionKey);
+      void refreshModelPickerState({ sessionKey: targetSessionKey, silent: true, showLoading: false });
+    }
     if (isOperationContextActive(context)) {
       renderMessages();
       maybeScrollMessagesToBottom(true);
@@ -2820,6 +2837,11 @@ function getSlashCommandName(text) {
 function shouldRefreshThinkingStateForCommand(command) {
   const name = getSlashCommandName(command);
   return name === '/think' || name === '/new' || name === '/reset' || name === '/model' || name === '/models';
+}
+
+function shouldRefreshModelStateForCommand(command) {
+  const name = getSlashCommandName(command);
+  return name === '/new' || name === '/reset' || name === '/model' || name === '/models';
 }
 
 function isWhitelistedSlash(commandName) {
@@ -2904,7 +2926,7 @@ function getThinkingButtonTitle() {
   return currentLabel ? `${baseLabel} · ${currentLabel}` : baseLabel;
 }
 
-function applyThinkingPickerPayload(payload) {
+function applyThinkingPickerPayload(payload, sessionKey = state.activeSessionKey) {
   state.thinkingPickerCurrentLevel = String(payload?.currentLevel || '').trim();
   if (Array.isArray(payload?.options)) {
     state.thinkingPickerOptions = payload.options.map(normalizeThinkingOption).filter(Boolean);
@@ -2912,27 +2934,58 @@ function applyThinkingPickerPayload(payload) {
   if (payload?.modelLabel !== undefined) {
     state.thinkingPickerModelLabel = String(payload?.modelLabel || '').trim();
   }
+  state.thinkingPickerLoadedSessionKey = String(sessionKey || '');
+  state.thinkingPickerLoadedAt = Date.parse(String(payload?.updatedAt || '')) || Date.now();
 }
 
-async function refreshThinkingButtonState({ sessionKey = state.activeSessionKey, silent = true } = {}) {
+function hasReusableThinkingPickerPayload(sessionKey) {
+  if (!sessionKey) return false;
+  if (state.thinkingPickerLoadedSessionKey !== sessionKey) return false;
+  if (state.thinkingPickerCurrentLevel) return true;
+  return state.thinkingPickerOptions.length > 0;
+}
+
+function isThinkingPickerPayloadFresh(sessionKey) {
+  if (!hasReusableThinkingPickerPayload(sessionKey)) return false;
+  return Date.now() - Number(state.thinkingPickerLoadedAt || 0) <= THINKING_PICKER_CACHE_TTL_MS;
+}
+
+async function refreshThinkingPickerState({
+  sessionKey = state.activeSessionKey,
+  silent = true,
+  showLoading = false
+} = {}) {
   if (!sessionKey) {
     state.thinkingPickerCurrentLevel = '';
     state.thinkingPickerOptions = [];
     state.thinkingPickerModelLabel = '';
+    state.thinkingPickerNotice = '';
     renderThinkingMenu();
-    return;
+    return null;
+  }
+
+  const requestId = ++state.thinkingPickerRequestId;
+  if (showLoading) {
+    state.thinkingPickerLoading = true;
+    renderThinkingMenu();
+    if (!silent) {
+      showStatus(t('status.loadingThinkingOptions'), 'info');
+    }
   }
 
   try {
     const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/thinking-options`);
-    if (state.activeSessionKey !== sessionKey) return;
-    applyThinkingPickerPayload(payload);
+    if (state.activeSessionKey !== sessionKey || requestId !== state.thinkingPickerRequestId) return null;
+    applyThinkingPickerPayload(payload, sessionKey);
+    state.thinkingPickerLoading = false;
     if (!state.thinkingPickerOpen) {
       state.thinkingPickerError = '';
     }
     renderThinkingMenu();
+    return payload;
   } catch (error) {
-    if (state.activeSessionKey !== sessionKey) return;
+    if (state.activeSessionKey !== sessionKey || requestId !== state.thinkingPickerRequestId) return null;
+    state.thinkingPickerLoading = false;
     if (!silent) {
       state.thinkingPickerError = t('status.thinkingOptionsFailed', { error: formatError(error) });
       renderThinkingMenu();
@@ -2940,7 +2993,12 @@ async function refreshThinkingButtonState({ sessionKey = state.activeSessionKey,
     } else {
       renderThinkingMenu();
     }
+    return null;
   }
+}
+
+async function refreshThinkingButtonState({ sessionKey = state.activeSessionKey, silent = true } = {}) {
+  await refreshThinkingPickerState({ sessionKey, silent, showLoading: false });
 }
 
 function closeThinkingMenu({ preserveData = true } = {}) {
@@ -2949,6 +3007,7 @@ function closeThinkingMenu({ preserveData = true } = {}) {
   state.thinkingPickerSwitchingLevel = '';
   if (!preserveData) {
     state.thinkingPickerError = '';
+    state.thinkingPickerNotice = '';
     state.thinkingPickerCurrentLevel = '';
     state.thinkingPickerOptions = [];
     state.thinkingPickerModelLabel = '';
@@ -2970,31 +3029,30 @@ function toggleThinkingMenu(event) {
 async function openThinkingMenu() {
   if (!state.activeSessionKey || isActiveSessionBusy()) return;
   const targetSessionKey = state.activeSessionKey;
+  const hasWarmPayload = hasReusableThinkingPickerPayload(targetSessionKey);
 
   state.thinkingPickerOpen = true;
-  state.thinkingPickerLoading = true;
+  state.thinkingPickerLoading = !hasWarmPayload;
   state.thinkingPickerError = '';
-  state.thinkingPickerCurrentLevel = '';
-  state.thinkingPickerOptions = [];
+  state.thinkingPickerNotice = '';
   state.thinkingPickerSwitchingLevel = '';
-  state.thinkingPickerModelLabel = '';
-  renderThinkingMenu();
-  showStatus(t('status.loadingThinkingOptions'), 'info');
 
-  try {
-    const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/thinking-options`);
-    if (state.activeSessionKey !== targetSessionKey) return;
-    applyThinkingPickerPayload(payload);
-    state.thinkingPickerLoading = false;
-    state.thinkingPickerError = state.thinkingPickerOptions.length ? '' : t('status.noAvailableThinkingLevels');
-    renderThinkingMenu();
-  } catch (error) {
-    if (state.activeSessionKey !== targetSessionKey) return;
-    state.thinkingPickerLoading = false;
-    state.thinkingPickerError = t('status.thinkingOptionsFailed', { error: formatError(error) });
-    renderThinkingMenu();
-    showStatus(state.thinkingPickerError, 'error');
+  if (!hasWarmPayload) {
+    state.thinkingPickerCurrentLevel = '';
+    state.thinkingPickerOptions = [];
+    state.thinkingPickerModelLabel = '';
   }
+
+  renderThinkingMenu();
+
+  if (hasWarmPayload) {
+    if (!isThinkingPickerPayloadFresh(targetSessionKey)) {
+      void refreshThinkingPickerState({ sessionKey: targetSessionKey, silent: true, showLoading: false });
+    }
+    return;
+  }
+
+  await refreshThinkingPickerState({ sessionKey: targetSessionKey, silent: false, showLoading: true });
 }
 
 function renderThinkingMenu() {
@@ -3030,6 +3088,17 @@ function renderThinkingMenu() {
     : t('text.thinkingPickerIntro');
 
   header.append(title, model, current);
+  if (state.thinkingPickerError || state.thinkingPickerNotice || state.thinkingPickerLoading) {
+    const status = document.createElement('div');
+    status.className = 'thinking-menu-status';
+    if (state.thinkingPickerError) {
+      status.classList.add('error');
+    }
+    status.textContent = state.thinkingPickerError
+      || state.thinkingPickerNotice
+      || t('status.loadingThinkingOptions');
+    header.append(status);
+  }
   thinkingMenuEl.append(header);
 
   if (!state.thinkingPickerOptions.length) {
@@ -3090,6 +3159,7 @@ async function switchSessionThinkingLevel(level) {
   const targetSessionKey = state.activeSessionKey;
 
   state.thinkingPickerError = '';
+  state.thinkingPickerNotice = '';
   state.thinkingPickerSwitchingLevel = level;
   renderThinkingMenu();
   showStatus(t('status.switchingThinking', { level }), 'info');
@@ -3099,17 +3169,18 @@ async function switchSessionThinkingLevel(level) {
       thinkingLevel: level
     });
     if (state.activeSessionKey !== targetSessionKey) return;
-    applyThinkingPickerPayload(payload);
+    applyThinkingPickerPayload(payload, targetSessionKey);
     if (!state.thinkingPickerCurrentLevel) {
       state.thinkingPickerCurrentLevel = level;
     }
     state.thinkingPickerSwitchingLevel = '';
+    state.thinkingPickerNotice = t('status.thinkingSwitchDone', { level: state.thinkingPickerCurrentLevel || level });
     renderThinkingMenu();
-    closeThinkingMenu();
     showStatus(t('status.thinkingSwitchDone', { level: state.thinkingPickerCurrentLevel || level }), 'success');
   } catch (error) {
     if (state.activeSessionKey !== targetSessionKey) return;
     state.thinkingPickerSwitchingLevel = '';
+    state.thinkingPickerNotice = '';
     state.thinkingPickerError = t('status.thinkingSwitchFailed', { error: formatError(error) });
     renderThinkingMenu();
     showStatus(state.thinkingPickerError, 'error');
@@ -3122,42 +3193,100 @@ function closeModelPicker({ preserveData = true } = {}) {
   state.modelPickerSwitchingLabel = '';
   if (!preserveData) {
     state.modelPickerError = '';
+    state.modelPickerNotice = '';
     state.modelPickerCurrent = null;
     state.modelPickerOptions = [];
   }
   renderModelPicker();
 }
 
-async function openModelPicker() {
-  if (!state.activeSessionKey || isActiveSessionBusy()) return;
-  const targetSessionKey = state.activeSessionKey;
+function applyModelPickerPayload(payload, sessionKey = state.activeSessionKey) {
+  state.modelPickerCurrent = normalizeModelOption(payload?.current);
+  state.modelPickerOptions = Array.isArray(payload?.models)
+    ? payload.models.map(normalizeModelOption).filter(Boolean)
+    : [];
+  state.modelPickerLoadedSessionKey = String(sessionKey || '');
+  state.modelPickerLoadedAt = Date.parse(String(payload?.updatedAt || '')) || Date.now();
+}
 
-  state.modelPickerOpen = true;
-  state.modelPickerLoading = true;
-  state.modelPickerError = '';
-  state.modelPickerCurrent = null;
-  state.modelPickerOptions = [];
-  state.modelPickerSwitchingLabel = '';
-  renderModelPicker();
-  showStatus(t('status.loadingModelOptions'), 'info');
+function markModelPickerPayloadStale(sessionKey = state.activeSessionKey) {
+  if (!sessionKey || state.modelPickerLoadedSessionKey !== sessionKey) return;
+  state.modelPickerLoadedAt = 0;
+}
+
+function hasReusableModelPickerPayload(sessionKey) {
+  if (!sessionKey) return false;
+  if (state.modelPickerLoadedSessionKey !== sessionKey) return false;
+  if (state.modelPickerCurrent) return true;
+  return state.modelPickerOptions.length > 0;
+}
+
+function isModelPickerPayloadFresh(sessionKey) {
+  if (!hasReusableModelPickerPayload(sessionKey)) return false;
+  return Date.now() - Number(state.modelPickerLoadedAt || 0) <= MODEL_PICKER_CACHE_TTL_MS;
+}
+
+async function refreshModelPickerState({
+  sessionKey = state.activeSessionKey,
+  silent = true,
+  showLoading = false
+} = {}) {
+  if (!sessionKey) return null;
+  const requestId = ++state.modelPickerRequestId;
+  if (showLoading) {
+    state.modelPickerLoading = true;
+    renderModelPicker();
+    if (!silent) {
+      showStatus(t('status.loadingModelOptions'), 'info');
+    }
+  }
 
   try {
-    const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(targetSessionKey)}/model-options`);
-    if (state.activeSessionKey !== targetSessionKey) return;
-    state.modelPickerCurrent = normalizeModelOption(payload?.current);
-    state.modelPickerOptions = Array.isArray(payload?.models)
-      ? payload.models.map(normalizeModelOption).filter(Boolean)
-      : [];
+    const payload = await apiGet(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/model-options`);
+    if (state.activeSessionKey !== sessionKey || requestId !== state.modelPickerRequestId) return null;
+    applyModelPickerPayload(payload, sessionKey);
     state.modelPickerLoading = false;
     state.modelPickerError = state.modelPickerOptions.length ? '' : t('status.noAvailableModels');
     renderModelPicker();
+    return payload;
   } catch (error) {
-    if (state.activeSessionKey !== targetSessionKey) return;
+    if (state.activeSessionKey !== sessionKey || requestId !== state.modelPickerRequestId) return null;
     state.modelPickerLoading = false;
-    state.modelPickerError = t('status.modelOptionsFailed', { error: formatError(error) });
+    if (!silent) {
+      state.modelPickerError = t('status.modelOptionsFailed', { error: formatError(error) });
+      showStatus(state.modelPickerError, 'error');
+    }
     renderModelPicker();
-    showStatus(state.modelPickerError, 'error');
+    return null;
   }
+}
+
+async function openModelPicker() {
+  if (!state.activeSessionKey || isActiveSessionBusy()) return;
+  const targetSessionKey = state.activeSessionKey;
+  const hasWarmPayload = hasReusableModelPickerPayload(targetSessionKey);
+
+  state.modelPickerOpen = true;
+  state.modelPickerError = '';
+  state.modelPickerNotice = '';
+  state.modelPickerSwitchingLabel = '';
+  state.modelPickerLoading = !hasWarmPayload;
+
+  if (!hasWarmPayload) {
+    state.modelPickerCurrent = null;
+    state.modelPickerOptions = [];
+  }
+
+  renderModelPicker();
+
+  if (hasWarmPayload) {
+    if (!isModelPickerPayloadFresh(targetSessionKey)) {
+      void refreshModelPickerState({ sessionKey: targetSessionKey, silent: true, showLoading: false });
+    }
+    return;
+  }
+
+  await refreshModelPickerState({ sessionKey: targetSessionKey, silent: false, showLoading: true });
 }
 
 function renderModelPicker() {
@@ -3174,6 +3303,7 @@ function renderModelPicker() {
   modelPickerCurrentEl.classList.toggle('muted', state.modelPickerCurrent?.available === false);
 
   const message = state.modelPickerError
+    || state.modelPickerNotice
     || (state.modelPickerCurrent?.available === false ? t('text.modelPickerCurrentMissing') : '')
     || (state.modelPickerSwitchingLabel ? t('status.switchingModel', { model: state.modelPickerSwitchingLabel }) : '')
     || (state.modelPickerLoading ? t('status.loadingModelOptions') : t('text.modelPickerIntro'));
@@ -3218,17 +3348,13 @@ function createModelPickerOption(option) {
   label.className = 'model-picker-option-label';
   label.textContent = option.label;
 
-  const meta = document.createElement('span');
-  meta.className = 'model-picker-option-meta';
-  meta.textContent = option.name && option.name !== option.label ? option.name : option.model;
-
   const badge = document.createElement('span');
   badge.className = 'model-picker-option-badge';
   badge.textContent = isSwitching
     ? (state.language === 'en' ? 'Switching' : '切换中')
     : (isCurrent ? t('ui.currentModel') : (state.language === 'en' ? 'Available' : '可切换'));
 
-  textWrap.append(label, meta);
+  textWrap.append(label);
   button.append(textWrap, badge);
   return button;
 }
@@ -3255,6 +3381,7 @@ async function switchSessionModel(option) {
   const targetLabel = option.label || `${option.provider}/${option.model}`;
 
   state.modelPickerError = '';
+  state.modelPickerNotice = '';
   state.modelPickerSwitchingLabel = targetLabel;
   renderModelPicker();
   showStatus(t('status.switchingModel', { model: targetLabel }), 'info');
@@ -3265,18 +3392,17 @@ async function switchSessionModel(option) {
       model: option.model
     });
     if (state.activeSessionKey !== targetSessionKey) return;
-    state.modelPickerCurrent = normalizeModelOption(payload?.current) || option;
-    state.modelPickerOptions = Array.isArray(payload?.models)
-      ? payload.models.map(normalizeModelOption).filter(Boolean)
-      : state.modelPickerOptions;
+    applyModelPickerPayload(payload, targetSessionKey);
+    state.modelPickerCurrent = state.modelPickerCurrent || option;
     state.modelPickerSwitchingLabel = '';
+    state.modelPickerNotice = t('status.modelSwitchDone', { model: state.modelPickerCurrent?.label || targetLabel });
     await refreshThinkingButtonState({ sessionKey: targetSessionKey, silent: true });
     renderModelPicker();
-    closeModelPicker();
     showStatus(t('status.modelSwitchDone', { model: state.modelPickerCurrent?.label || targetLabel }), 'success');
   } catch (error) {
     if (state.activeSessionKey !== targetSessionKey) return;
     state.modelPickerSwitchingLabel = '';
+    state.modelPickerNotice = '';
     state.modelPickerError = t('status.modelSwitchFailed', { error: formatError(error) });
     renderModelPicker();
     showStatus(state.modelPickerError, 'error');

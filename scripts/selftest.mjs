@@ -10,6 +10,7 @@ const requestTimeoutMs = Number(process.env.OPENCLAW_WEBCHAT_SELFTEST_REQUEST_TI
 const defaultBindingsFile = fileURLToPath(new URL('../data/session-bindings.json', import.meta.url));
 const defaultProfilesFile = fileURLToPath(new URL('../data/agent-profiles.json', import.meta.url));
 const defaultServerFile = fileURLToPath(new URL('../src/server.js', import.meta.url));
+const defaultAppFile = fileURLToPath(new URL('../public/app.js', import.meta.url));
 const bindingsFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
   ? path.join(path.resolve(process.env.OPENCLAW_WEBCHAT_DATA_DIR), 'session-bindings.json')
   : defaultBindingsFile;
@@ -107,6 +108,9 @@ async function checkPageShell() {
   assert(appJs.includes('function renderCommandMenu'), 'app.js should include slash command menu rendering');
   assert(appJs.includes('async function executeSlashCommand'), 'app.js should include slash command execution');
   assert(appJs.includes('async function openModelPicker'), 'app.js should include model picker loader');
+  assert(appJs.includes('const MODEL_PICKER_CACHE_TTL_MS = 15000;'), 'app.js should include a short-lived model picker cache TTL');
+  assert(appJs.includes('async function refreshModelPickerState'), 'app.js should include reusable model picker refresh logic');
+  assert(appJs.includes('function shouldRefreshModelStateForCommand(command)'), 'app.js should refresh model picker state after model/session slash commands');
   assert(appJs.includes('async function switchSessionModel'), 'app.js should include model switch handler');
   assert(appJs.includes('async function stopActiveSessionReply'), 'app.js should include current reply stop handler');
   assert(appJs.includes('async function openThinkingMenu'), 'app.js should include thinking picker loader');
@@ -165,11 +169,19 @@ async function checkPageShell() {
   assert(css.includes(':root[data-theme="light-mist"]'), 'styles.css should include mist light theme tokens');
   assert(css.includes(':root[data-theme="light-sand"]'), 'styles.css should include sand light theme tokens');
   assert(css.includes('.media-viewer'), 'styles.css should include media viewer styles');
+  assert(css.includes('grid-template-rows: auto auto auto auto minmax(0, 1fr);'), 'model picker card should reserve scrollable space for the option list');
+  assert(css.includes('.model-picker-list {\n  min-height: 0;\n  max-height: 100%;\n  overflow: auto;'), 'model picker list should own its own scrolling region');
 }
 
 async function checkBootstrapContract() {
   const serverJs = fs.readFileSync(defaultServerFile, 'utf8');
+  const appJs = fs.readFileSync(defaultAppFile, 'utf8');
   assert(serverJs.includes("const BOOTSTRAP_VERSION = '2026-03-24.media-v1';"), 'server bootstrap version should reflect the media guidance refresh');
+  assert(serverJs.includes('const MODEL_CATALOG_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_MODEL_CATALOG_CACHE_TTL_MS || 30000);'), 'server should cache gateway model catalogs briefly');
+  assert(serverJs.includes('const SESSION_STATE_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_STATE_CACHE_TTL_MS || 2500);'), 'server should cache gateway session state briefly');
+  assert(serverJs.includes('function summarizeModelCatalog(models) {'), 'server should summarize the model catalog by provider for slash output');
+  assert(appJs.includes('const THINKING_PICKER_CACHE_TTL_MS = 15000;'), 'app should cache thinking picker payloads briefly for warm reopen');
+  assert(appJs.includes("state.thinkingPickerNotice = t('status.thinkingSwitchDone'"), 'thinking picker should keep a visible success notice after switching');
   assert(serverJs.includes('You are replying inside Claw WebChat.'), 'bootstrap should target Claw WebChat explicitly');
   assert(serverJs.includes('Use that fallback for both local files and direct remote media URLs.'), 'bootstrap should explain local and remote fallback media handling');
   assert(serverJs.includes("Do not use `message` tool or any `webchat` channel send path."), 'bootstrap should forbid unsupported webchat message-tool media sending');
@@ -343,6 +355,9 @@ async function checkSlashCommands() {
   assert(modelOptions?.current?.model, 'model-options should return current model');
   assert(Array.isArray(modelOptions?.models), 'model-options should return model list');
   assert(modelOptions.models.length > 0, 'model-options should include at least one selectable model');
+  for (const option of modelOptions.models) {
+    assert(modelText.includes(String(option.model || '')), `/model should mention available model ${option.model}`);
+  }
   const currentOption = modelOptions.models.find((item) => (
     item?.provider === modelOptions.current.provider && item?.model === modelOptions.current.model
   )) || modelOptions.models[0];

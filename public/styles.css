@@ -1608,10 +1608,15 @@ button {
 
 .thinking-menu-model,
 .thinking-menu-current,
+.thinking-menu-status,
 .thinking-menu-empty {
   font-size: 12px;
   line-height: 1.45;
   color: var(--muted);
+}
+
+.thinking-menu-status.error {
+  color: #fca5a5;
 }
 
 .thinking-menu-options {
@@ -1780,6 +1785,7 @@ button {
   box-shadow: var(--shadow);
   padding: 24px;
   display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   gap: 16px;
   overflow: hidden;
 }
@@ -1836,6 +1842,7 @@ button {
 
 .model-picker-list {
   min-height: 0;
+  max-height: 100%;
   overflow: auto;
   display: grid;
   gap: 10px;
