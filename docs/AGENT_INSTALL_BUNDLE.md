@@ -21,6 +21,8 @@ This bundle flow is best when:
 - Node.js `20+` is already installed
 - the target machine is macOS and can use a user LaunchAgent
 
+If OpenClaw or Node.js is missing, stop and switch to [AGENT_INSTALL_NETWORK.md](./AGENT_INSTALL_NETWORK.md) first. Return to this bundle guide only after `openclaw --version`, `node -v`, and `npm -v` all succeed.
+
 ## Inputs You Need Before Starting
 
 Do not continue until all four inputs are known:

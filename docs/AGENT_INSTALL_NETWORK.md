@@ -12,13 +12,20 @@ Follow these rules strictly:
 4. Never assume tools already exist just because they usually do.
 5. If your model is weaker at long shell workflows, narrate state after every step.
 
+## Capability Notes
+
+- Stronger models may pair one action command with its immediate verification command when the output is short and unambiguous.
+- Lower-capability models should run exactly one command at a time, then report `pass` or `blocked` before moving on.
+- If a step requires user secrets, provider choice, or a path you do not know, stop and ask only for that missing input.
+
 ## Best-Fit Environment
 
 This flow is best when:
 - the target machine has network access
 - the user wants the agent to fetch software directly
 - GitHub access is available
-- OpenClaw is already installed or can be installed separately first
+- the target machine is macOS, Linux, or WSL with `bash` and `curl`
+- OpenClaw may already be installed, or may need to be bootstrapped first with the official installer
 
 ## Inputs You Need Before Starting
 
@@ -28,46 +35,110 @@ Do not continue until all inputs are known:
 - whether to install from the latest release tag or from `main`
 - whether the user wants local-only or LAN / Tailscale access
 - whether the user wants lightweight auth enabled
+- whether OpenClaw is already configured with a usable model provider; if not, which provider/auth path the user wants to use during `openclaw onboard`
 
 If the user does not care about branch choice, prefer the latest GitHub Release. Use `main` only when the user explicitly wants the newest unreleased state.
 
-## Step 1: Verify Core Tools
+## Step 1: Verify Platform And Network Reachability
 
 Run:
 
 ```bash
+uname -s
+bash --version | head -1
+curl --version
+curl -I https://github.com
+curl -I https://openclaw.ai
+```
+
+Check:
+- the OS is one of: `Darwin`, `Linux`
+- `bash` exists
+- `curl` exists
+- both HTTPS checks succeed with response headers
+
+If any check fails:
+- stop
+- report exactly what is missing or unreachable
+- fix that prerequisite before continuing
+
+If the OS is not supported by this guide:
+- stop here
+- report that this network guide currently targets macOS, Linux, or WSL-style shells
+
+## Step 2: Verify Or Bootstrap OpenClaw CLI And Node Runtime
+
+Run:
+
+```bash
+command -v openclaw || true
+node -v || true
+npm -v || true
+```
+
+Check:
+- if `openclaw`, `node`, and `npm` already exist, record their versions and continue
+- if any of them are missing, or Node.js is older than `v20`, bootstrap OpenClaw first with the official installer
+
+The command below follows the current official OpenClaw install path:
+- [OpenClaw CLI docs](https://openclawlab.com/en/docs/cli/)
+- [OpenClaw setup docs](https://openclawlab.com/en/docs/getting-started/setup/)
+
+Official bootstrap command:
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+```
+
+Then verify:
+
+```bash
+openclaw --version
 node -v
 npm -v
-git --version
-curl --version
-openclaw --version
 ```
 
-Check:
-- Node.js is `v20` or newer
-- `npm`, `git`, and `curl` exist
-- `openclaw --version` succeeds
+Only continue if all three checks succeed.
 
-If any tool is missing:
+If the bootstrap fails:
 - stop
-- report exactly which tool is missing
-- install that prerequisite before continuing
+- report the exact failing stage
+- do not continue to repository download until `openclaw --version`, `node -v`, and `npm -v` all work
 
-## Step 2: Verify Network Reachability
+## Step 3: Verify Or Complete OpenClaw Onboarding
 
-Run:
+First probe whether OpenClaw is already usable:
 
 ```bash
-curl -I https://github.com
-curl -I https://api.github.com
+openclaw gateway call health --json
 ```
 
 Check:
-- both commands succeed with HTTP headers
+- if valid JSON is returned, OpenClaw is already usable and you may continue
+- if it fails because OpenClaw has not been configured yet, complete onboarding before continuing
 
-If GitHub is unreachable, stop and fix network access first.
+To complete onboarding, run:
 
-## Step 3: Fetch The Source
+```bash
+openclaw onboard
+```
+
+This follows the current official OpenClaw onboarding flow described in the setup docs above.
+
+Check after onboarding:
+
+```bash
+openclaw gateway call health --json
+```
+
+Only continue if the health check now returns valid JSON.
+
+If onboarding requires a provider choice or credential the agent does not have:
+- stop
+- ask only for the missing provider/auth input
+- resume from this step after onboarding is complete
+
+## Step 4: Fetch The Source
 
 ### Option A: Install From Latest Release Source
 
@@ -99,9 +170,12 @@ Use this only when the user explicitly wants the latest mainline state:
 ```bash
 mkdir -p /ABSOLUTE/PATH/TO/INSTALL_PARENT
 cd /ABSOLUTE/PATH/TO/INSTALL_PARENT
-git clone https://github.com/memphislee09-source/claw-webchat.git
-cd claw-webchat
-git checkout main
+curl -fL https://github.com/memphislee09-source/claw-webchat/archive/refs/heads/main.tar.gz -o claw-webchat-main.tar.gz
+EXTRACTED_DIR="$(tar -tzf claw-webchat-main.tar.gz | head -1 | cut -d/ -f1)"
+test -n "$EXTRACTED_DIR" && echo "Archive root: $EXTRACTED_DIR"
+tar -xzf claw-webchat-main.tar.gz
+rm -rf claw-webchat
+mv "$EXTRACTED_DIR" claw-webchat
 ```
 
 Check:
@@ -115,7 +189,7 @@ test -d public && echo OK
 
 Do not continue unless all three checks pass.
 
-## Step 4: Install Dependencies
+## Step 5: Install Dependencies
 
 Run inside the project directory:
 
@@ -132,7 +206,7 @@ npm run check
 
 Both must succeed before you continue.
 
-## Step 5: Verify OpenClaw Gateway Reachability
+## Step 6: Verify OpenClaw Gateway Reachability
 
 Run:
 
@@ -146,7 +220,7 @@ Check:
 
 If not, stop and fix the OpenClaw side first.
 
-## Step 6: Choose Runtime Settings
+## Step 7: Choose Runtime Settings
 
 For local-only access, defaults are usually enough.
 
@@ -175,7 +249,7 @@ lsof -nP -iTCP:3770 -sTCP:LISTEN
 
 If the port is already in use, stop and choose another one.
 
-## Step 7: First Manual Start
+## Step 8: First Manual Start
 
 Run from the project directory:
 
@@ -197,7 +271,7 @@ Confirm:
 
 If the user selected LAN / Tailscale access, also check the chosen host or IP path.
 
-## Step 8: Run Functional Smoke Test
+## Step 9: Run Functional Smoke Test
 
 Run:
 
@@ -210,7 +284,7 @@ Check:
 
 If the environment cannot support `selftest`, record that clearly and explain why.
 
-## Step 9: Enable Background Service
+## Step 10: Enable Background Service
 
 If the machine is macOS and the user wants a persistent background service:
 
@@ -301,7 +375,7 @@ If the machine is not macOS:
 - stop at a manual install unless the user gives a different service manager target
 - report that persistent service setup was not applied
 
-## Step 10: Apply UI Settings
+## Step 11: Apply UI Settings
 
 Open the UI and configure:
 - access mode
@@ -325,6 +399,7 @@ The install is complete only if:
 - the UI loads
 - `npm run selftest` passed or a clear reason was documented
 - background service is enabled if requested
+- the chosen access mode and auth mode match the user request
 
 ## If You Are A Lower-Capability Agent
 

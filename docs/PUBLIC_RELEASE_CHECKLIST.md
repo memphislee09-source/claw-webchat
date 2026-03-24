@@ -39,6 +39,11 @@ Use this checklist before recommending Claw WebChat in the OpenClaw community.
 - [ ] Install docs are current:
   - [ ] `docs/AGENT_INSTALL_BUNDLE.md`
   - [ ] `docs/AGENT_INSTALL_NETWORK.md`
+  - [ ] both install guides require one step plus one check before proceeding
+  - [ ] both install guides include a lower-capability-agent fallback mode
+  - [ ] both install guides end with a final completion gate
+  - [ ] the bundle guide covers install, configure, and background-service enablement from a downloaded release asset
+  - [ ] the network guide covers prerequisite bootstrap, repository download, configuration, and background-service enablement over the network
 - [ ] Security wording is clear that this project is local-first / private-network-first
 
 ## 5. GitHub Repo Hygiene

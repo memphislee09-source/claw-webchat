@@ -9,6 +9,9 @@ The format is intentionally lightweight and follows a simple versioned release l
 ### Fixed
 - Remove the duplicate idle-state helper copy from the `/model` picker modal so the introductory explanation is shown only once while no loading, success, or error message is active
 
+### Changed
+- Tighten the public agent-install docs so the release-bundle and network-install paths both use explicit step-by-step checks, lower-capability-agent fallback guidance, and a final completion gate; the network guide now also covers official OpenClaw bootstrap before fetching WebChat over the network
+
 ## [0.1.6] - 2026-03-24
 
 ### Changed

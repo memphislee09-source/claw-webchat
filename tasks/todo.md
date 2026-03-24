@@ -36,6 +36,10 @@
 - [x] Update task/docs records for the `/model` picker copy follow-up
 - [x] Verify the follow-up with `npm run check`
 - [x] Commit and push the `/model` picker copy follow-up to GitHub
+- [x] Audit public install docs against the two required install paths
+- [x] Tighten bundle/network agent install guides so both are step-by-step with checks and low-capability fallback
+- [x] Update public release docs/checklist to reflect the stronger install-doc requirement
+- [ ] Verify the doc-only follow-up and sync it to GitHub
 
 ## Review
 - Read `status.md`, `docs/HANDOFF-2026-03-24.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`,
@@ -171,3 +175,14 @@
   - Synced the follow-up into `CHANGELOG.md`, `status.md`, and `docs/HANDOFF-2026-03-24.md`.
   - Verification passed: `npm run check`.
   - Synced to GitHub on `main` with commit `40e80e0` (`fix: remove duplicate model picker copy`).
+- Public install-doc completeness follow-up:
+  - Audited the public release path against the required two install methods: downloaded release
+    bundle and network-based installation.
+  - Tightened `docs/AGENT_INSTALL_BUNDLE.md` so the bundle path explicitly bounces missing
+    Node/OpenClaw prerequisites to the network bootstrap path before returning.
+  - Tightened `docs/AGENT_INSTALL_NETWORK.md` so it now covers official OpenClaw bootstrap and
+    onboarding before downloading WebChat, keeps the one-step/one-check discipline, and avoids a
+    hard `git` dependency by using tarball downloads for both release and `main`.
+  - Updated `README.md`, `docs/PUBLIC_RELEASE_CHECKLIST.md`, `CHANGELOG.md`, and `status.md` so
+    the public repo now states this install-doc standard explicitly.
+  - Verification passed: `npm run check`.

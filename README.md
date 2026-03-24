@@ -39,11 +39,13 @@ Use this when you want the easiest public-release install path and prefer a pack
 - For maintainers building the artifact: run `npm run bundle`
 - For human operators: download the release bundle asset from the latest GitHub Release, then follow the agent-safe guide below
 - For OpenClaw agents: use [docs/AGENT_INSTALL_BUNDLE.md](docs/AGENT_INSTALL_BUNDLE.md)
+- The bundle guide is written as a step-by-step, check-before-next-step flow and includes a lower-capability-agent fallback mode
 
 ### Option 2: Install Over The Network
 Use this when you want the latest published repository state or need the agent to fetch dependencies directly.
 
 - For OpenClaw agents: use [docs/AGENT_INSTALL_NETWORK.md](docs/AGENT_INSTALL_NETWORK.md)
+- The network guide includes official prerequisite bootstrap when `openclaw` or Node.js is missing, then continues with repository download, verification, configuration, and service enablement
 
 ### Public Release Checklist
 - Before recommending the project in the OpenClaw community, run through [docs/PUBLIC_RELEASE_CHECKLIST.md](docs/PUBLIC_RELEASE_CHECKLIST.md)
@@ -85,7 +87,7 @@ curl http://127.0.0.1:3770/healthz
 - Theme presets plus Simplified Chinese / English UI switching
 
 ## Compatibility And Assumptions
-- OpenClaw is expected to be installed and usable before WebChat setup begins
+- OpenClaw is expected to be installed and usable before WebChat setup begins in manual or bundle-first flows; the network install guide can bootstrap it first when needed
 - The current default background-service guidance is macOS-oriented and uses `launchd`
 - Manual `npm start` still works without `launchd`
 - The project does not currently target public-internet multi-tenant hosting
