@@ -51,6 +51,8 @@ const PROJECT_VERSION = normalizeOptionalString(PACKAGE_JSON?.version) || '0.1.6
 const RESTART_LABEL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_LAUNCHD_LABEL)
   || normalizeOptionalString(process.env.XPC_SERVICE_NAME)
   || 'ai.openclaw.webchat';
+const EVENT_STREAM_RETRY_MS = Number(process.env.OPENCLAW_WEBCHAT_EVENT_STREAM_RETRY_MS || 3000);
+const EVENT_STREAM_KEEPALIVE_MS = Number(process.env.OPENCLAW_WEBCHAT_EVENT_STREAM_KEEPALIVE_MS || 20000);
 const lateReplyReconciliations = new Set();
 const authSessions = new Map();
 const activeTurnControllers = new Map();
@@ -58,6 +60,7 @@ const stoppedTurnStates = new Map();
 const ABORTED_ASSISTANT_REPLY = Symbol('openclaw-webchat-aborted-assistant-reply');
 const gatewayModelsCache = { value: null, expiresAt: 0, promise: null };
 const gatewaySessionsCache = { value: null, expiresAt: 0, promise: null };
+const eventStreamClients = new Map();
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -162,6 +165,27 @@ app.get('/api/openclaw-webchat/commands', (_req, res) => {
     commands: SLASH_COMMAND_DEFS,
     allowed: SLASH_COMMAND_DEFS.map((item) => item.name),
     updatedAt: new Date().toISOString()
+  });
+});
+
+app.get('/api/openclaw-webchat/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const clientId = cryptoId();
+  const keepalive = setInterval(() => {
+    writeEventStreamChunk(res, ': keepalive\n\n');
+  }, EVENT_STREAM_KEEPALIVE_MS);
+
+  eventStreamClients.set(clientId, { res, keepalive });
+  writeEventStreamChunk(res, `retry: ${EVENT_STREAM_RETRY_MS}\n\n`);
+  sendEventStreamEvent(res, 'connected', { clientId });
+
+  req.on('close', () => {
+    closeEventStreamClient(clientId);
   });
 });
 
@@ -1537,8 +1561,19 @@ function getBindingBySessionKey(sessionKey) {
 function patchBinding(agentId, patch) {
   const bindings = readBindings();
   if (!bindings[agentId]) throw new Error(`Binding not found: ${agentId}`);
+  const previous = bindings[agentId];
   bindings[agentId] = normalizeBindingRecord(agentId, { ...bindings[agentId], ...patch });
   writeBindings(bindings);
+  if (shouldBroadcastBindingUpdate(previous, bindings[agentId])) {
+    broadcastEventStream('agent-update', {
+      agentId,
+      sessionKey: bindings[agentId].sessionKey || null,
+      replyState: bindings[agentId].replyState || 'idle',
+      lastAssistantAt: bindings[agentId].lastAssistantAt || null,
+      lastSummary: bindings[agentId].lastSummary || '',
+      bootstrapVersion: bindings[agentId].bootstrapVersion || null
+    });
+  }
   return bindings[agentId];
 }
 
@@ -1871,6 +1906,58 @@ function appendHistory(agentId, sessionKey, message) {
   });
 
   fs.appendFileSync(historyFile(agentId), `${JSON.stringify(row)}\n`, 'utf8');
+  if (shouldBroadcastHistoryUpdate(row)) {
+    broadcastEventStream('conversation-update', {
+      agentId: row.agentId,
+      sessionKey: row.sessionKey || null,
+      messageId: row.id || null,
+      role: row.role || null,
+      createdAt: row.createdAt || null
+    });
+  }
+}
+
+function shouldBroadcastBindingUpdate(previous, next) {
+  if (!previous || !next) return true;
+  return normalizeOptionalString(previous.replyState) !== normalizeOptionalString(next.replyState)
+    || normalizeOptionalString(previous.lastAssistantAt) !== normalizeOptionalString(next.lastAssistantAt)
+    || normalizeOptionalString(previous.lastSummary) !== normalizeOptionalString(next.lastSummary);
+}
+
+function shouldBroadcastHistoryUpdate(row) {
+  const role = normalizeOptionalString(row?.role);
+  return role === 'assistant' || role === 'marker';
+}
+
+function sendEventStreamEvent(res, event, payload = {}) {
+  const body = JSON.stringify({
+    ...payload,
+    emittedAt: new Date().toISOString()
+  });
+  return writeEventStreamChunk(res, `event: ${event}\ndata: ${body}\n\n`);
+}
+
+function broadcastEventStream(event, payload = {}) {
+  for (const [clientId, client] of eventStreamClients.entries()) {
+    const ok = sendEventStreamEvent(client.res, event, payload);
+    if (!ok) closeEventStreamClient(clientId);
+  }
+}
+
+function writeEventStreamChunk(res, chunk) {
+  try {
+    res.write(chunk);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function closeEventStreamClient(clientId) {
+  const client = eventStreamClients.get(clientId);
+  if (!client) return;
+  clearInterval(client.keepalive);
+  eventStreamClients.delete(clientId);
 }
 
 function getHistoryPage({ agentId, limit, before }) {

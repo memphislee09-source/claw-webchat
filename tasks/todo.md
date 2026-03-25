@@ -23,10 +23,10 @@
 - [x] Tighten the hidden media bootstrap so local audio/mp3 outputs are explicitly sent back via `MEDIA:` / `mediaUrl:`
 - [x] Refresh existing sessions onto the new bootstrap contract and add regression coverage for audio fallback guidance
 - [x] Verify the mp3 send-path fix and record the result in docs/review notes
-- [ ] Sync the current mainline fixes/docs to GitHub before starting the event-driven refresh follow-up
-- [ ] Create a new feature branch from updated `main` for the event-driven refresh implementation
-- [ ] Replace the 10s agent polling loop with an event-driven update path while keeping a safe fallback
-- [ ] Verify the event-driven refresh branch and update docs with the new architecture/behavior
+- [x] Sync the current mainline fixes/docs to GitHub before starting the event-driven refresh follow-up
+- [x] Create a new feature branch from updated `main` for the event-driven refresh implementation
+- [x] Replace the 10s agent polling loop with an event-driven update path while keeping a safe fallback
+- [x] Verify the event-driven refresh branch and update docs with the new architecture/behavior
 
 ## Current Review
 - Verified the active repository is `claw-webchat` at `/Users/memphis/.openclaw/workspace-mira/claw-webchat`.
@@ -69,6 +69,13 @@
   Wangyuyan's binding remains on the older bootstrap until the next user turn triggers reinjection.
 - The next requested follow-up is to first sync the current mainline state to GitHub, then branch off and implement
   an event-driven refresh path in place of the fixed 10-second polling model.
+- Mainline sync completed on `main` with commit `3fd80c8` (`fix: stabilize conversation refresh behavior`), then the
+  event-driven follow-up branch was created as `codex/sse-event-refresh`.
+- The event-driven refresh branch now exposes `/api/openclaw-webchat/events` as an SSE stream, broadcasts binding/history
+  changes from the server, subscribes from the browser with `EventSource`, and reduces the old fixed 10-second polling
+  loop to a 60-second fallback safety net.
+- Verification for the event-driven follow-up passed with `npm run check`, `npm run selftest`, LaunchAgent restart +
+  `http://127.0.0.1:3770/healthz`, and a direct SSE smoke test that returned the `connected` event frame.
 
 ## Previous Task Log
 - [x] Confirm repository path and current branch baseline

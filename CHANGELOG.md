@@ -17,6 +17,7 @@ The format is intentionally lightweight and follows a simple versioned release l
 - Simplify the composer-side thinking control back to a static `T` button and move the current session status into the chat header, where the active model and full thinking level name are shown beside the agent title
 - Rework the conversation pane scroll model so bottom-following, history-reading, background-refresh notice handling, and `Home` / `End` / `PageUp` / `PageDown` keyboard navigation all use the same rules
 - Refresh the hidden bootstrap version again so existing agent sessions re-ingest the stricter local-audio fallback guidance on their next open/send path
+- Add an SSE-based event stream for agent/session updates so the UI now refreshes primarily on real server-side changes, while the old fixed 10-second polling loop is reduced to a low-frequency safety net
 
 ## [0.1.6] - 2026-03-24
 

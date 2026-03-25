@@ -540,7 +540,12 @@ const state = {
   sendingSessionKeys: new Set(),
   stoppingSessionKeys: new Set(),
   stopRequestedSessionKeys: new Set(),
+  eventSource: null,
   pollingTimer: null,
+  backgroundRefreshTimer: null,
+  backgroundRefreshInFlight: false,
+  backgroundRefreshPending: false,
+  backgroundRefreshNeedsCurrent: false,
   selectedOpenPromise: null,
   openRequestId: 0,
   commandCatalog: [],
@@ -1279,6 +1284,7 @@ async function loadAuthenticatedApp({ force = false } = {}) {
     loadCommandCatalog()
   ]);
   await refreshAgents({ autoOpen: true });
+  connectEventStream();
   startPolling();
   state.appReady = true;
   renderAuthGate();
@@ -1287,6 +1293,7 @@ async function loadAuthenticatedApp({ force = false } = {}) {
 
 function lockAppForAuth() {
   state.appReady = false;
+  disconnectEventStream();
   closeModelPicker({ preserveData: false });
   releasePendingUploads(state.pendingUploads);
   state.agents = [];
@@ -1300,6 +1307,13 @@ function lockAppForAuth() {
   state.autoScrollPinned = true;
   state.pendingConversationRefresh = false;
   state.pendingConversationRefreshSyncing = false;
+  if (state.backgroundRefreshTimer) {
+    clearTimeout(state.backgroundRefreshTimer);
+    state.backgroundRefreshTimer = null;
+  }
+  state.backgroundRefreshInFlight = false;
+  state.backgroundRefreshPending = false;
+  state.backgroundRefreshNeedsCurrent = false;
   clearInterval(state.pollingTimer);
   state.pollingTimer = null;
   renderAgentList({ refreshIdentity: false });
@@ -5019,12 +5033,70 @@ function isOperationContextActive(context) {
 function startPolling() {
   clearInterval(state.pollingTimer);
   state.pollingTimer = setInterval(async () => {
-    try {
-      await refreshAgents({ autoOpen: false });
-    } catch {
-      // silent background refresh
+    queueBackgroundRefresh();
+  }, 60000);
+}
+
+function connectEventStream() {
+  disconnectEventStream();
+  if (!state.authenticated || typeof window.EventSource !== 'function') return;
+
+  const source = new window.EventSource('/api/openclaw-webchat/events');
+  state.eventSource = source;
+  source.addEventListener('connected', () => {
+    if (state.eventSource !== source) return;
+  });
+  source.addEventListener('agent-update', handleServerEvent);
+  source.addEventListener('conversation-update', handleServerEvent);
+  source.onerror = () => {
+    if (state.eventSource !== source) return;
+  };
+}
+
+function disconnectEventStream() {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+}
+
+function handleServerEvent(event) {
+  if (!state.appReady) return;
+  const payload = safeJsonParse(event?.data);
+  if (!payload || typeof payload !== 'object') return;
+  queueBackgroundRefresh();
+}
+
+function queueBackgroundRefresh({ refreshCurrent = false, delayMs = 120 } = {}) {
+  if (refreshCurrent) state.backgroundRefreshNeedsCurrent = true;
+  if (state.backgroundRefreshTimer) return;
+  state.backgroundRefreshTimer = setTimeout(() => {
+    state.backgroundRefreshTimer = null;
+    void flushBackgroundRefreshQueue();
+  }, delayMs);
+}
+
+async function flushBackgroundRefreshQueue() {
+  if (state.backgroundRefreshInFlight) {
+    state.backgroundRefreshPending = true;
+    return;
+  }
+
+  const refreshCurrent = state.backgroundRefreshNeedsCurrent;
+  state.backgroundRefreshNeedsCurrent = false;
+  state.backgroundRefreshInFlight = true;
+
+  try {
+    await refreshAgents({ autoOpen: false, refreshCurrent });
+  } catch {
+    // silent background refresh
+  } finally {
+    state.backgroundRefreshInFlight = false;
+    if (state.backgroundRefreshPending || state.backgroundRefreshNeedsCurrent) {
+      state.backgroundRefreshPending = false;
+      queueBackgroundRefresh({ delayMs: 120 });
     }
-  }, 10000);
+  }
 }
 
 function toggleSidebar(open) {

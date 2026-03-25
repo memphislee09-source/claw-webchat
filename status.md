@@ -49,6 +49,7 @@
   - gateway CLI stdout 混合日志兼容解析，插件诊断日志不会再打断 `/model`、`/think` 等本地 slash 命令
   - `/model` 已支持当前 agent 级模型切换弹窗：显示当前模型与可用模型列表，并可直接切换到 `provider/model` 目标
   - 输入区右侧保留静态 `T` thinking 控件；当前 session 的模型与完整 thinking level 会显示在聊天头部 agent 名称右侧，点击 `T` 后仍可弹出当前模型可用的 thinking 选项并直接切换
+  - 前端已接入 `/api/openclaw-webchat/events` SSE 事件流：agent 列表与当前会话现在优先根据服务端真实变化触发刷新，固定轮询已降为低频兜底而非主同步机制
   - 对话区头像尺寸已与左栏头像统一，不再因消息区布局出现大小漂移
   - 用户发送后在 agent 处理中阶段保持对话贴底，不再短暂下沉回上一条可见消息
   - 视频消息在未播放前会显示缩略预览层，至少可见首帧或视频标题/播放提示
@@ -140,6 +141,7 @@
 - 2026-03-25 已将输入区右侧 thinking 控件收回为静态 `T` 图标，避免切换 agent 时等待 thinking 标签刷新；当前 session 的模型与完整 thinking level 已改为显示在聊天头部 agent 名称右侧
 - 2026-03-25 已重做对话栏滚动模型：阅读历史时后台刷新不再直接把视口打断到旧消息位置；当前会话重渲染会保住可见锚点，并新增 `Home` / `End` / `PageUp` / `PageDown` 键盘支持
 - 2026-03-25 已补 Wangyuyan mp3 回传协议收口：隐藏 bootstrap 现在明确要求把已生成的本地 `.mp3` / `.wav` 音频直接按 `MEDIA:` / `mediaUrl:` 返回，而不是声称 Claw WebChat 不能接收该文件；bootstrap 版本也已提升以强制现有 session 重新注入
+- 2026-03-25 已在 `codex/sse-event-refresh` 上实现事件驱动刷新第一版：服务端会把 binding/history 变化通过 SSE 推给前端，前端优先按事件刷新 agent 列表与当前会话，固定轮询从 10 秒降为 60 秒兜底
 - 2026-03-24 已补设置面板“关于”版本号显示，并把 thinking 按钮字重收轻，保证它作为工具控件不抢主发送动作
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题

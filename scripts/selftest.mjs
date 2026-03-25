@@ -180,9 +180,17 @@ async function checkBootstrapContract() {
   const serverJs = fs.readFileSync(defaultServerFile, 'utf8');
   const appJs = fs.readFileSync(defaultAppFile, 'utf8');
   assert(serverJs.includes("const BOOTSTRAP_VERSION = '2026-03-25.media-v2';"), 'server bootstrap version should reflect the latest media guidance refresh');
+  assert(serverJs.includes("app.get('/api/openclaw-webchat/events', (req, res) => {"), 'server should expose an SSE events endpoint for event-driven refresh');
+  assert(serverJs.includes("broadcastEventStream('agent-update'"), 'server should broadcast agent updates onto the SSE stream');
+  assert(serverJs.includes("broadcastEventStream('conversation-update'"), 'server should broadcast conversation updates onto the SSE stream');
   assert(serverJs.includes('const MODEL_CATALOG_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_MODEL_CATALOG_CACHE_TTL_MS || 30000);'), 'server should cache gateway model catalogs briefly');
   assert(serverJs.includes('const SESSION_STATE_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_STATE_CACHE_TTL_MS || 2500);'), 'server should cache gateway session state briefly');
   assert(serverJs.includes('function summarizeModelCatalog(models) {'), 'server should summarize the model catalog by provider for slash output');
+  assert(appJs.includes("const source = new window.EventSource('/api/openclaw-webchat/events');"), 'app should connect to the SSE events endpoint');
+  assert(appJs.includes("source.addEventListener('agent-update', handleServerEvent);"), 'app should subscribe to agent-update SSE events');
+  assert(appJs.includes("source.addEventListener('conversation-update', handleServerEvent);"), 'app should subscribe to conversation-update SSE events');
+  assert(appJs.includes('queueBackgroundRefresh();'), 'app should queue background refresh work from SSE or fallback polling');
+  assert(appJs.includes('}, 60000);'), 'fallback polling should be reduced to a low-frequency safety net');
   assert(appJs.includes('const THINKING_PICKER_CACHE_TTL_MS = 15000;'), 'app should cache thinking picker payloads briefly for warm reopen');
   assert(appJs.includes("state.thinkingPickerNotice = t('status.thinkingSwitchDone'"), 'thinking picker should keep a visible success notice after switching');
   assert(serverJs.includes('You are replying inside Claw WebChat.'), 'bootstrap should target Claw WebChat explicitly');
