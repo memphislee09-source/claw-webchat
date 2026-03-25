@@ -48,7 +48,7 @@
   - 历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序
   - gateway CLI stdout 混合日志兼容解析，插件诊断日志不会再打断 `/model`、`/think` 等本地 slash 命令
   - `/model` 已支持当前 agent 级模型切换弹窗：显示当前模型与可用模型列表，并可直接切换到 `provider/model` 目标
-  - 输入区右侧已新增 thinking 控件：动态 `T:*` 标签会反映当前 session 的 thinking level，点击后可弹出当前模型可用的 thinking 选项并直接切换
+  - 输入区右侧保留静态 `T` thinking 控件；当前 session 的模型与完整 thinking level 会显示在聊天头部 agent 名称右侧，点击 `T` 后仍可弹出当前模型可用的 thinking 选项并直接切换
   - 对话区头像尺寸已与左栏头像统一，不再因消息区布局出现大小漂移
   - 用户发送后在 agent 处理中阶段保持对话贴底，不再短暂下沉回上一条可见消息
   - 视频消息在未播放前会显示缩略预览层，至少可见首帧或视频标题/播放提示
@@ -90,7 +90,7 @@
 - 历史搜索第二阶段首批增强：日期范围筛选、`20 / 50 / 100` 结果数切换、更强匹配策略
 - gateway stdout 混合日志兼容解析，避免插件诊断输出干扰上游 JSON 查询
 - 当前 agent 已支持通过 `/model` 弹窗查看当前模型、浏览可用模型列表并直接切换模型
-- 当前 agent 已支持通过输入区右侧的动态 `T:*` thinking 按钮查看并切换当前 session 的 thinking level
+- 当前 agent 已支持通过输入区右侧的静态 `T` thinking 按钮查看并切换当前 session 的 thinking level；当前模型与完整 thinking level 会显示在聊天头部
 - 聊天区头像尺寸与左栏保持一致，视频消息支持未播放前预览，处理中阶段的贴底体验已补稳
 - 输入框发送按钮已切换为发送/停止双态图标按钮，可在当前 agent 处理中直接停止本轮任务
 - 设置面板“关于”已显示当前版本号
@@ -111,6 +111,7 @@
 ## 最近主线变更
 - `main` 已补公开安装文档完整性收口：bundle / network 两套 agent 安装说明现在都强调逐步校验、低能力模型 fallback 和最终完成门槛；network 流程也补上了 OpenClaw 官方 bootstrap + onboard 再继续下载 WebChat 的闭环
 - `main` 已补一个 `0.1.6` 后续小修：`/model` 弹窗空闲态不再在顶部说明之外重复显示第二份相同介绍文案
+- `main` 已补一个 `0.1.6` 后续小修：agent 切换时不再等待 thinking 状态请求才打开会话；输入区右侧 thinking 控件回到静态 `T` 图标，当前模型与完整 thinking level 改为显示在聊天头部标题旁
 - `0.1.6` 已收口准备同步：`/model` 完整列表与响应速度修复、模型弹窗滚动/停留交互收口，以及 `T:*` thinking 菜单的同级提速与停留确认交互都已纳入当前版本
 - `0.1.5` 已同步到 GitHub：历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布文档与图片查看器缩放读数修复均已纳入当前版本
 - `f27a1d4` `feat: add theme preset variants`
@@ -133,7 +134,7 @@
 - 2026-03-24 已完成显示层品牌改名：用户可见项目名统一为 `Claw WebChat`，但后端技术标识仍保持 `openclaw-webchat`
 - 2026-03-24 已修复 Athena 发图时误走 `message` 工具的问题：隐藏 bootstrap 现在更短但更明确，agent 默认知道用 `MEDIA:` / `mediaUrl:` 回传本地媒体与远程直链媒体
 - 2026-03-24 常规桌面媒体默认上限调整为 `70vw`，以及右侧消息区滚动乱跳修复，现已并入 `main`，后续继续以当前主线为开发基点
-- 2026-03-24 已新增输入区右侧 thinking 控件：按钮会按当前 session 显示 `T:Off / Min / L / M / H / X / Ada` 等状态，弹出菜单后可直接切换当前模型支持的 thinking level
+- 2026-03-25 已将输入区右侧 thinking 控件收回为静态 `T` 图标，避免切换 agent 时等待 thinking 标签刷新；当前 session 的模型与完整 thinking level 已改为显示在聊天头部 agent 名称右侧
 - 2026-03-24 已补设置面板“关于”版本号显示，并把 thinking 按钮字重收轻，保证它作为工具控件不抢主发送动作
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题

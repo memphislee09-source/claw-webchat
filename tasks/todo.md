@@ -1,6 +1,41 @@
 # Task Todo
 
 ## Current Task
+- [x] Confirm the active worktree is `/Users/memphis/.openclaw/workspace-mira/claw-webchat`
+- [x] Re-read the core project docs (`status.md`, latest handoff, architecture, roadmap, requirements, error log, README, package manifest)
+- [x] Reconfirm the development baseline, naming constraints, and current branch/remote state
+- [x] Record a short project-status snapshot for the next implementation turn
+- [x] Check the current local vs GitHub sync state for `main`
+- [x] Mark the local `media/` directory as ignored-only and keep it out of sync checks
+- [x] Reduce visible agent-switch lag caused by the dynamic `T` thinking button
+- [x] Show current model and thinking level next to the active agent name in the chat header
+- [x] Verify the UI changes with project checks
+- [x] Update project docs for the thinking-button/header follow-up
+- [x] Sync the follow-up to GitHub
+
+## Current Review
+- Verified the active repository is `claw-webchat` at `/Users/memphis/.openclaw/workspace-mira/claw-webchat`.
+- Verified `main` is the only development baseline; local `HEAD` and `origin/main` both point to `f4c8bd8`
+  (`docs: record shared dev repo bootstrap`), while `ee656ce` is no longer the latest pushed commit.
+- Reconfirmed the naming rule: user-facing branding should stay `Claw WebChat`, but backend technical
+  identifiers intentionally remain `openclaw-webchat`, including `/api/openclaw-webchat/*`,
+  `OPENCLAW_WEBCHAT_*`, and namespace/service identifiers.
+- Current shipped baseline remains `0.1.6` with history search phase-2 first batch, session-scoped
+  `/model` picker, session-scoped `T:*` thinking menu, send/stop dual-state composer, tightened media
+  fallback bootstrap, desktop media `70vw` cap, and stabilized right-pane scrolling.
+- The next unresolved priorities still match the latest handoff: mobile history loading stability,
+  visual media bubble/manual comparison, broader multi-agent late-reply regression, audio transcription
+  success-path validation, and the next round of history-search polish.
+- The local `media/` directory is now ignored through `.git/info/exclude`, so it stays in the worktree
+  without becoming a repo-tracked or GitHub-synced path.
+- The thinking button follow-up now avoids blocking `openAgent(...)`: session switching no longer waits for
+  the thinking-options request before rendering the conversation, the composer button has been simplified
+  back to a static `T`, and the active session's model / thinking state is shown beside the header title.
+- The header-side thinking state now uses the full level name (for example `off`, `minimal`, `medium`)
+  instead of the abbreviated `T:*` label form.
+- Verification passed for this UI follow-up with `npm run check` and `npm run selftest`.
+
+## Previous Task Log
 - [x] Confirm repository path and current branch baseline
 - [x] Read handoff and core project documentation
 - [x] Summarize current architecture, shipped capabilities, and open risks

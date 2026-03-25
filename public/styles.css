@@ -607,6 +607,31 @@ button {
   min-width: 0;
 }
 
+.chat-title-row {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.chat-title-row h2 {
+  margin: 0;
+  min-width: 0;
+}
+
+.chat-session-meta {
+  max-width: min(48vw, 560px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  font-family: "SFMono-Regular", ui-monospace, "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
 .chat-header-actions {
   margin-left: auto;
   justify-content: flex-end;
@@ -2490,6 +2515,10 @@ button {
   .chat-subtitle,
   #headerRefreshButton {
     display: none;
+  }
+
+  .chat-session-meta {
+    max-width: 100%;
   }
 
   .model-picker {

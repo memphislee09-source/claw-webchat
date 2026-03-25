@@ -8,9 +8,11 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ### Fixed
 - Remove the duplicate idle-state helper copy from the `/model` picker modal so the introductory explanation is shown only once while no loading, success, or error message is active
+- Stop waiting for `thinking-options` during agent switches, so opening another conversation no longer blocks on refreshing the composer-side thinking indicator first
 
 ### Changed
 - Tighten the public agent-install docs so the release-bundle and network-install paths both use explicit step-by-step checks, lower-capability-agent fallback guidance, and a final completion gate; the network guide now also covers official OpenClaw bootstrap before fetching WebChat over the network
+- Simplify the composer-side thinking control back to a static `T` button and move the current session status into the chat header, where the active model and full thinking level name are shown beside the agent title
 
 ## [0.1.6] - 2026-03-24
 

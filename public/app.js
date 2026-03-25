@@ -637,6 +637,7 @@ const agentListEl = document.getElementById('agentList');
 const messageListEl = document.getElementById('messageList');
 const chatTitleEl = document.getElementById('chatTitle');
 const chatSubtitleEl = document.getElementById('chatSubtitle');
+const chatSessionMetaEl = document.getElementById('chatSessionMeta');
 const chatStatusEl = document.getElementById('chatStatus');
 const headerPresenceEl = document.getElementById('headerPresence');
 const historySearchShellEl = document.getElementById('historySearchShell');
@@ -1519,6 +1520,7 @@ function updateAgentCardIdentity(button, agent) {
 async function openAgent(agentId, { forceReload = false, preserveScrollBottom = false } = {}) {
   if (!agentId) return;
   if (state.selectedOpenPromise && state.activeAgentId === agentId && !forceReload) return state.selectedOpenPromise;
+  const switchingAgent = state.activeAgentId !== agentId;
   if (state.activeAgentId !== agentId) {
     closeModelPicker({ preserveData: false });
     closeThinkingMenu({ preserveData: false });
@@ -1539,8 +1541,8 @@ async function openAgent(agentId, { forceReload = false, preserveScrollBottom = 
     const response = await apiPost(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/open`, {});
     if (requestId !== state.openRequestId || state.activeAgentId !== agentId) return;
     state.activeSessionKey = response.sessionKey;
-    await refreshThinkingButtonState({ sessionKey: response.sessionKey, silent: true });
-    if (!forceReload) {
+    if (switchingAgent || !forceReload) {
+      void refreshThinkingButtonState({ sessionKey: response.sessionKey, silent: true });
       void refreshModelPickerState({ sessionKey: response.sessionKey, silent: true, showLoading: false });
     }
     state.messages = Array.isArray(response.history?.messages) ? response.history.messages : [];
@@ -2861,6 +2863,7 @@ function updateHeader() {
   chatSubtitleEl.textContent = active
     ? `${active.hasSession ? t('status.timelineLongLived') : t('status.clickToCreate')} · ${active.summary || t('status.noSummary')}`
     : t('ui.selectAgent');
+  renderHeaderSessionMeta();
   headerPresenceEl.className = `presence-dot ${normalizePresence(active?.presence || 'idle')}`;
   if (!active) {
     if (state.thinkingPickerOpen) {
@@ -2905,25 +2908,60 @@ function normalizeThinkingOption(option) {
 }
 
 function getThinkingButtonLabel() {
-  const currentLevel = String(state.thinkingPickerCurrentLevel || '').trim().toLowerCase();
-  if (!currentLevel) return 'T';
-  const map = {
-    off: 'Off',
-    minimal: 'Min',
-    low: 'L',
-    medium: 'M',
-    high: 'H',
-    xhigh: 'X',
-    adaptive: 'Ada',
-    on: 'On'
-  };
-  return `T:${map[currentLevel] || currentLevel}`;
+  return 'T';
+}
+
+function formatThinkingLevelHeader(level) {
+  const currentLevel = String(level || '').trim().toLowerCase();
+  if (!currentLevel) return '';
+  return currentLevel;
 }
 
 function getThinkingButtonTitle() {
   const baseLabel = t('ui.openThinkingMenu');
   const currentLabel = String(state.thinkingPickerCurrentLevel || '').trim();
   return currentLabel ? `${baseLabel} · ${currentLabel}` : baseLabel;
+}
+
+function getActiveSessionModelLabel() {
+  const sessionKey = String(state.activeSessionKey || '').trim();
+  if (!sessionKey) return '';
+  if (state.thinkingPickerLoadedSessionKey === sessionKey && state.thinkingPickerModelLabel) {
+    return state.thinkingPickerModelLabel;
+  }
+  if (state.modelPickerLoadedSessionKey === sessionKey && state.modelPickerCurrent?.label) {
+    return state.modelPickerCurrent.label;
+  }
+  return '';
+}
+
+function getActiveSessionThinkingLabel() {
+  const sessionKey = String(state.activeSessionKey || '').trim();
+  if (!sessionKey) return '';
+  if (state.thinkingPickerLoadedSessionKey !== sessionKey) return '';
+  return formatThinkingLevelHeader(state.thinkingPickerCurrentLevel);
+}
+
+function renderHeaderSessionMeta() {
+  if (!chatSessionMetaEl) return;
+  const active = getActiveAgent();
+  if (!active || !state.activeSessionKey) {
+    chatSessionMetaEl.textContent = '';
+    chatSessionMetaEl.hidden = true;
+    chatSessionMetaEl.classList.add('hidden');
+    return;
+  }
+
+  const parts = [];
+  const modelLabel = getActiveSessionModelLabel();
+  const thinkingLabel = getActiveSessionThinkingLabel();
+  if (modelLabel) parts.push(modelLabel);
+  if (thinkingLabel) parts.push(thinkingLabel);
+
+  const text = parts.join(' · ');
+  chatSessionMetaEl.textContent = text;
+  chatSessionMetaEl.hidden = !text;
+  chatSessionMetaEl.classList.toggle('hidden', !text);
 }
 
 function applyThinkingPickerPayload(payload, sessionKey = state.activeSessionKey) {
@@ -2936,6 +2974,7 @@ function applyThinkingPickerPayload(payload, sessionKey = state.activeSessionKey
   }
   state.thinkingPickerLoadedSessionKey = String(sessionKey || '');
   state.thinkingPickerLoadedAt = Date.parse(String(payload?.updatedAt || '')) || Date.now();
+  renderHeaderSessionMeta();
 }
 
 function hasReusableThinkingPickerPayload(sessionKey) {
@@ -3207,6 +3246,7 @@ function applyModelPickerPayload(payload, sessionKey = state.activeSessionKey) {
     : [];
   state.modelPickerLoadedSessionKey = String(sessionKey || '');
   state.modelPickerLoadedAt = Date.parse(String(payload?.updatedAt || '')) || Date.now();
+  renderHeaderSessionMeta();
 }
 
 function markModelPickerPayloadStale(sessionKey = state.activeSessionKey) {
