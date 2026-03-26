@@ -39,6 +39,8 @@ const ASSISTANT_WAIT_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_ASSISTANT_
 const ASSISTANT_LATE_REPLY_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_LATE_REPLY_TIMEOUT_MS || 10 * 60 * 1000);
 const MAX_IMAGE_UPLOAD_BYTES = Number(process.env.OPENCLAW_WEBCHAT_MAX_IMAGE_UPLOAD_BYTES || 10 * 1024 * 1024);
 const MAX_AUDIO_UPLOAD_BYTES = Number(process.env.OPENCLAW_WEBCHAT_MAX_AUDIO_UPLOAD_BYTES || 20 * 1024 * 1024);
+const MAX_VIDEO_UPLOAD_BYTES = Number(process.env.OPENCLAW_WEBCHAT_MAX_VIDEO_UPLOAD_BYTES || 100 * 1024 * 1024);
+const MAX_FILE_UPLOAD_BYTES = Number(process.env.OPENCLAW_WEBCHAT_MAX_FILE_UPLOAD_BYTES || 50 * 1024 * 1024);
 const WHISPER_BIN = process.env.OPENCLAW_WEBCHAT_WHISPER_BIN || 'whisper';
 const WHISPER_MODEL = process.env.OPENCLAW_WEBCHAT_WHISPER_MODEL || 'tiny';
 const WHISPER_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_WHISPER_TIMEOUT_MS || 45000);
@@ -49,7 +51,7 @@ const MODEL_CATALOG_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_MODEL_CAT
 const SESSION_STATE_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_STATE_CACHE_TTL_MS || 2500);
 const PROJECT_GITHUB_URL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_GITHUB_URL)
   || 'https://github.com/memphislee09-source/claw-webchat';
-const PROJECT_VERSION = normalizeOptionalString(PACKAGE_JSON?.version) || '0.1.7';
+const PROJECT_VERSION = normalizeOptionalString(PACKAGE_JSON?.version) || '0.1.8';
 const RESTART_LABEL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_LAUNCHD_LABEL)
   || normalizeOptionalString(process.env.XPC_SERVICE_NAME)
   || 'ai.openclaw.webchat';
@@ -736,8 +738,8 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
   const transcribe = req.body?.transcribe !== false;
   const durationMs = Number.isFinite(Number(req.body?.durationMs)) ? Math.max(0, Math.round(Number(req.body.durationMs))) : null;
 
-  if (!['image', 'audio'].includes(kind)) {
-    return res.status(400).json({ error: 'Only image and audio uploads are supported right now.' });
+  if (!['image', 'audio', 'video', 'file'].includes(kind)) {
+    return res.status(400).json({ error: 'Unsupported upload kind.' });
   }
 
   if (!contentBase64) {
@@ -754,9 +756,9 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
       return res.status(400).json({ error: 'Upload content is empty.' });
     }
 
-    const maxBytes = kind === 'audio' ? MAX_AUDIO_UPLOAD_BYTES : MAX_IMAGE_UPLOAD_BYTES;
+    const maxBytes = maxUploadBytesForKind(kind);
     if (buffer.byteLength > maxBytes) {
-      return res.status(413).json({ error: `${kind === 'audio' ? 'Audio' : 'Image'} is too large. Limit is ${Math.floor(maxBytes / (1024 * 1024))} MB.` });
+      return res.status(413).json({ error: `${uploadKindLabel(kind)} is too large. Limit is ${Math.floor(maxBytes / (1024 * 1024))} MB.` });
     }
 
     const stored = persistUpload({ kind, filename, mimeType, buffer });
@@ -766,7 +768,7 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
       name: stored.displayName,
       mimeType,
       sizeBytes: buffer.byteLength,
-      durationMs: kind === 'audio' ? durationMs : undefined
+      durationMs: kind === 'audio' || kind === 'video' ? durationMs : undefined
     };
 
     if (kind === 'audio' && transcribe) {
@@ -790,7 +792,7 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
         name: stored.displayName,
         size: buffer.byteLength,
         mimeType,
-        durationMs: kind === 'audio' ? durationMs : null,
+        durationMs: kind === 'audio' || kind === 'video' ? durationMs : null,
         transcriptStatus: block.transcriptStatus || null,
         transcriptText: block.transcriptText || null,
         transcriptError: block.transcriptError || null
@@ -2185,14 +2187,18 @@ function buildUpstreamMessage(blocks) {
     }
 
     if (['image', 'audio', 'video', 'file'].includes(block.type)) {
-      const source = String(block.source || '').trim();
-      if (!source) continue;
-      const displayName = normalizeOptionalString(block.name) || path.basename(source);
-      attachmentHints.push(`- ${block.type}: ${displayName} (${source})`);
+      const materialized = materializeAttachmentForUpstream(block);
+      const fallbackName = normalizeOptionalString(block.name)
+        || path.basename(String(block.source || '').trim() || block.type);
+      if (!materialized) {
+        attachmentHints.push(`- ${block.type}: ${fallbackName} (source unavailable)`);
+      } else {
+        attachmentHints.push(formatUpstreamAttachmentHint(materialized));
+      }
       if (block.type === 'audio' && block.transcriptStatus === 'ready' && block.transcriptText) {
-        transcriptHints.push(`- ${displayName}:\n${indentText(String(block.transcriptText), '  ')}`);
+        transcriptHints.push(`- ${materialized?.name || fallbackName}:\n${indentText(String(block.transcriptText), '  ')}`);
       } else if (block.type === 'audio' && block.transcriptStatus === 'failed') {
-        transcriptHints.push(`- ${displayName}: transcript unavailable`);
+        transcriptHints.push(`- ${materialized?.name || fallbackName}: transcript unavailable`);
       }
     }
   }
@@ -2202,11 +2208,59 @@ function buildUpstreamMessage(blocks) {
   return [
     textParts.join('\n\n').trim(),
     '[openclaw-webchat user attachments]',
-    'The user uploaded the following files. Use them as input context if relevant, but do not mention this wrapper format unless needed.',
+    'The user uploaded the following files. Each attachment source below is directly readable by this runtime. Use them as input context if relevant, but do not mention this wrapper format unless needed.',
     ...attachmentHints,
     transcriptHints.length ? '[openclaw-webchat audio transcripts]' : '',
     ...transcriptHints
   ].filter(Boolean).join('\n');
+}
+
+function materializeAttachmentForUpstream(block) {
+  if (!block || typeof block !== 'object') return null;
+  const readableSource = resolveAttachmentSourceForUpstream(block.source);
+  if (!readableSource) return null;
+  return {
+    type: block.type,
+    source: readableSource,
+    name: normalizeOptionalString(block.name) || path.basename(readableSource),
+    mimeType: normalizeOptionalString(block.mimeType) || null,
+    sizeBytes: Number.isFinite(Number(block.sizeBytes)) ? Number(block.sizeBytes) : null,
+    durationMs: Number.isFinite(Number(block.durationMs)) ? Number(block.durationMs) : null
+  };
+}
+
+function resolveAttachmentSourceForUpstream(source) {
+  const normalized = normalizeOptionalString(source);
+  if (!normalized) return null;
+
+  const mediaPath = decodeWebchatMediaPath(normalized, { ignoreExpiration: true });
+  if (mediaPath) return mediaPath;
+
+  const localPath = resolveLocalMediaPath(normalized);
+  if (localPath) {
+    const resolved = resolveExistingPath(localPath);
+    if (isAllowedMediaPath(resolved) && fs.existsSync(resolved)) {
+      return resolved;
+    }
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  return null;
+}
+
+function formatUpstreamAttachmentHint(attachment) {
+  const qualifiers = [];
+  if (attachment.mimeType) qualifiers.push(attachment.mimeType);
+  if (Number.isFinite(attachment.sizeBytes) && attachment.sizeBytes > 0) qualifiers.push(`${attachment.sizeBytes} bytes`);
+  if (['audio', 'video'].includes(attachment.type) && Number.isFinite(attachment.durationMs) && attachment.durationMs > 0) {
+    qualifiers.push(`${attachment.durationMs} ms`);
+  }
+  const qualifierText = qualifiers.length ? ` [${qualifiers.join('; ')}]` : '';
+  return `- ${attachment.type}: ${attachment.name}${qualifierText} (${attachment.source})`;
 }
 
 async function stopUserTurn(binding) {
@@ -3434,6 +3488,8 @@ function isSupportedUploadMime(kind, mimeType) {
   const mime = String(mimeType || '').toLowerCase();
   if (kind === 'image') return /^image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml)$/.test(mime);
   if (kind === 'audio') return /^audio\/(mpeg|mp3|wav|x-wav|wave|mp4|x-m4a|aac|ogg|opus|flac|webm)$/.test(mime);
+  if (kind === 'video') return /^video\/(mp4|mpeg|quicktime|webm|x-matroska|x-msvideo|3gpp)$/.test(mime);
+  if (kind === 'file') return Boolean(mime);
   return false;
 }
 
@@ -3477,7 +3533,31 @@ function inferUploadExtension(filename, mimeType, kind) {
     return '.m4a';
   }
 
+  if (kind === 'video') {
+    if (mime === 'video/mp4' || mime === 'video/mpeg') return '.mp4';
+    if (mime === 'video/quicktime') return '.mov';
+    if (mime === 'video/webm') return '.webm';
+    if (mime === 'video/x-matroska') return '.mkv';
+    if (mime === 'video/x-msvideo') return '.avi';
+    if (mime === 'video/3gpp') return '.3gp';
+    return '.mp4';
+  }
+
   return '.bin';
+}
+
+function maxUploadBytesForKind(kind) {
+  if (kind === 'audio') return MAX_AUDIO_UPLOAD_BYTES;
+  if (kind === 'video') return MAX_VIDEO_UPLOAD_BYTES;
+  if (kind === 'file') return MAX_FILE_UPLOAD_BYTES;
+  return MAX_IMAGE_UPLOAD_BYTES;
+}
+
+function uploadKindLabel(kind) {
+  if (kind === 'audio') return 'Audio';
+  if (kind === 'video') return 'Video';
+  if (kind === 'file') return 'File';
+  return 'Image';
 }
 
 async function transcribeAudioFile(filePath, displayName) {
@@ -3597,10 +3677,9 @@ function presentAvatarUrl(value) {
   return normalizeSafeRemoteMediaUrl(normalized);
 }
 
-function decodeAvatarMediaPath(value) {
+function decodeWebchatMediaPath(value, { ignoreExpiration = true, secrets = [MEDIA_SECRET] } = {}) {
   const normalized = normalizeOptionalString(value);
-  if (!normalized) return null;
-  if (!normalized.includes('/api/openclaw-webchat/media')) return null;
+  if (!normalized || !normalized.includes('/api/openclaw-webchat/media')) return null;
 
   try {
     const parsed = normalized.startsWith('http://') || normalized.startsWith('https://')
@@ -3609,17 +3688,21 @@ function decodeAvatarMediaPath(value) {
     if (parsed.pathname !== '/api/openclaw-webchat/media') return null;
     const token = parsed.searchParams.get('token');
     if (!token) return null;
-    const payload = decodeMediaTokenWithSecrets(
-      token,
-      [MEDIA_SECRET, ...LEGACY_AVATAR_MEDIA_SECRETS],
-      { ignoreExpiration: true }
-    );
+    const payload = decodeMediaTokenWithSecrets(token, secrets, { ignoreExpiration });
     if (!payload?.path) return null;
     const resolved = path.resolve(payload.path);
-    return isAllowedMediaPath(resolved) ? sourceFromLocalPath(resolved) : null;
+    return isAllowedMediaPath(resolved) ? resolved : null;
   } catch {
     return null;
   }
+}
+
+function decodeAvatarMediaPath(value) {
+  const resolved = decodeWebchatMediaPath(value, {
+    ignoreExpiration: true,
+    secrets: [MEDIA_SECRET, ...LEGACY_AVATAR_MEDIA_SECRETS]
+  });
+  return resolved ? sourceFromLocalPath(resolved) : null;
 }
 
 function resolveMediaSecret() {

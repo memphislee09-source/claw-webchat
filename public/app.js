@@ -68,7 +68,7 @@ const I18N = {
       searchDateTo: '结束日期',
       searchResultLimit: '结果数',
       composerPlaceholder: '输入消息，Enter 换行；点 / 按钮或直接输入 slash 命令可执行本地命令',
-      attachMedia: '上传图片或音频',
+      attachMedia: '上传附件',
       openSlashMenu: '打开 slash 命令菜单',
       openThinkingMenu: '打开 thinking 菜单',
       send: '发送',
@@ -171,7 +171,7 @@ const I18N = {
       locateFailed: '未能定位到该条历史消息。',
       locateSuccess: '已跳转到历史命中消息。',
       emptyTimelineTitle: '当前时间线还没有消息',
-      emptyTimelineTip: '点输入框左侧的 + 可上传图片或音频；音频默认转写后发给 agent，同时保留原始文件引用。',
+      emptyTimelineTip: '点输入框左侧的 + 可上传附件；音频默认转写后发给 agent，同时保留原始文件引用。',
       contextReset: '已重置上下文',
       fileMissing: '文件丢失',
       viewImage: '查看图片',
@@ -192,7 +192,7 @@ const I18N = {
       stoppingReply: '正在停止当前回复…',
       replyStopped: '已停止当前回复。',
       replyStopFailed: '停止当前回复失败：{error}',
-      uploadOnlyImageAudio: '仅支持图片或音频上传：{name}',
+      uploadOnlyImageAudio: '暂不支持该附件类型：{name}',
       noLocalCommands: '当前没有可用本地命令',
       executingCommand: '正在执行 {name}…',
       commandFailed: '命令失败：{error}',
@@ -220,15 +220,21 @@ const I18N = {
       processingAgent: 'agent 正在处理',
       unnamedAudio: '未命名音频',
       unnamedImage: '未命名图片',
+      unnamedVideo: '未命名视频',
+      unnamedFile: '未命名文件',
       remove: '移除',
       uploadReadyWithMessage: '已就绪，发送时会一并带上',
       uploadAutoImage: '发送时自动上传',
       uploadAutoAudio: '发送时自动上传并转写',
+      uploadAutoVideo: '发送时自动上传',
+      uploadAutoFile: '发送时自动上传',
       transcriptReady: '转写完成 · {summary}',
       transcriptFailedSendAudio: '转写失败，仍会发送原音频',
       uploadFailed: '上传失败：{name}',
       uploadingAudio: '正在上传并转写音频 {index}/{total}…',
       uploadingImage: '正在上传图片 {index}/{total}…',
+      uploadingVideo: '正在上传视频 {index}/{total}…',
+      uploadingFile: '正在上传文件 {index}/{total}…',
       readFileFailed: '读取文件失败：{name}',
       cropUnsupported: '浏览器不支持头像裁剪。',
       imageCropLoadFailed: '图片加载失败，无法裁剪头像。',
@@ -304,7 +310,7 @@ const I18N = {
       searchDateTo: 'To',
       searchResultLimit: 'Limit',
       composerPlaceholder: 'Type a message. Enter inserts a newline. Use the / button or type a slash command to run local commands.',
-      attachMedia: 'Upload image or audio',
+      attachMedia: 'Upload attachments',
       openSlashMenu: 'Open slash command menu',
       openThinkingMenu: 'Open thinking menu',
       send: 'Send',
@@ -407,7 +413,7 @@ const I18N = {
       locateFailed: 'Could not locate that history message.',
       locateSuccess: 'Jumped to the matched history message.',
       emptyTimelineTitle: 'This timeline has no messages yet',
-      emptyTimelineTip: 'Use the + button next to the composer to upload images or audio. Audio is transcribed before being sent to the agent while preserving the original file reference.',
+      emptyTimelineTip: 'Use the + button next to the composer to upload attachments. Audio is transcribed before being sent to the agent while preserving the original file reference.',
       contextReset: 'Context reset',
       fileMissing: 'File missing',
       viewImage: 'View image',
@@ -428,7 +434,7 @@ const I18N = {
       stoppingReply: 'Stopping the current reply…',
       replyStopped: 'Stopped the current reply.',
       replyStopFailed: 'Failed to stop the current reply: {error}',
-      uploadOnlyImageAudio: 'Only image or audio uploads are supported: {name}',
+      uploadOnlyImageAudio: 'This attachment type is not supported yet: {name}',
       noLocalCommands: 'No local commands are currently available.',
       executingCommand: 'Running {name}…',
       commandFailed: 'Command failed: {error}',
@@ -456,15 +462,21 @@ const I18N = {
       processingAgent: 'agent is processing',
       unnamedAudio: 'Untitled audio',
       unnamedImage: 'Untitled image',
+      unnamedVideo: 'Untitled video',
+      unnamedFile: 'Untitled file',
       remove: 'Remove',
       uploadReadyWithMessage: 'Ready and will be included when sent',
       uploadAutoImage: 'Will upload when sent',
       uploadAutoAudio: 'Will upload and transcribe when sent',
+      uploadAutoVideo: 'Will upload when sent',
+      uploadAutoFile: 'Will upload when sent',
       transcriptReady: 'Transcript ready · {summary}',
       transcriptFailedSendAudio: 'Transcription failed, but the original audio will still be sent',
       uploadFailed: 'Upload failed: {name}',
       uploadingAudio: 'Uploading and transcribing audio {index}/{total}…',
       uploadingImage: 'Uploading image {index}/{total}…',
+      uploadingVideo: 'Uploading video {index}/{total}…',
+      uploadingFile: 'Uploading file {index}/{total}…',
       readFileFailed: 'Failed to read file: {name}',
       cropUnsupported: 'This browser does not support avatar cropping.',
       imageCropLoadFailed: 'The image failed to load and could not be cropped.',
@@ -626,7 +638,7 @@ const state = {
   },
   projectInfo: {
     name: BRAND_NAME,
-    version: '0.1.7',
+    version: '0.1.8',
     summary: '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: 'https://github.com/memphislee09-source/claw-webchat'
   },
@@ -1250,7 +1262,7 @@ function normalizeServiceSettings(payload) {
 function normalizeProjectInfo(payload) {
   return {
     name: BRAND_NAME,
-    version: payload?.version || '0.1.7',
+    version: payload?.version || '0.1.8',
     summary: payload?.summary || '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: payload?.githubUrl || 'https://github.com/memphislee09-source/claw-webchat'
   };
@@ -2865,7 +2877,7 @@ async function handleFileSelection(event) {
       file,
       kind,
       name: file.name,
-      mimeType: file.type || (kind === 'audio' ? 'audio/m4a' : 'image/png'),
+      mimeType: file.type || defaultMimeTypeForAttachmentKind(kind),
       previewUrl: kind === 'image' ? URL.createObjectURL(file) : null,
       source: null,
       uploadedUrl: null,
@@ -3970,16 +3982,14 @@ function renderPendingUploads() {
     const item = document.createElement('div');
     item.className = `pending-upload ${attachment.kind}`;
 
-    const preview = attachment.kind === 'image'
-      ? createPendingImagePreview(attachment)
-      : createPendingAudioPreview();
+    const preview = createPendingAttachmentPreview(attachment);
 
     const meta = document.createElement('div');
     meta.className = 'pending-upload-meta';
 
     const title = document.createElement('div');
     title.className = 'pending-upload-name';
-    title.textContent = attachment.name || (attachment.kind === 'audio' ? t('status.unnamedAudio') : t('status.unnamedImage'));
+    title.textContent = attachment.name || getPendingAttachmentFallbackName(attachment.kind);
 
     const subtitle = document.createElement('div');
     subtitle.className = 'pending-upload-hint';
@@ -4013,9 +4023,38 @@ function createPendingAudioPreview() {
   return badge;
 }
 
+function createPendingGenericPreview(label) {
+  const badge = document.createElement('div');
+  badge.className = 'pending-upload-audio';
+  badge.textContent = label;
+  return badge;
+}
+
+function createPendingAttachmentPreview(attachment) {
+  if (attachment.kind === 'image') return createPendingImagePreview(attachment);
+  if (attachment.kind === 'audio') return createPendingAudioPreview();
+  if (attachment.kind === 'video') return createPendingGenericPreview(t('status.videoLabel'));
+  return createPendingGenericPreview(t('status.fileLabel'));
+}
+
+function getPendingAttachmentFallbackName(kind) {
+  if (kind === 'audio') return t('status.unnamedAudio');
+  if (kind === 'image') return t('status.unnamedImage');
+  if (kind === 'video') return t('status.unnamedVideo');
+  return t('status.unnamedFile');
+}
+
 function buildPendingUploadHint(attachment) {
   if (attachment.kind === 'image') {
     return attachment.source ? t('status.uploadReadyWithMessage') : t('status.uploadAutoImage');
+  }
+
+  if (attachment.kind === 'video') {
+    return attachment.source ? t('status.uploadReadyWithMessage') : t('status.uploadAutoVideo');
+  }
+
+  if (attachment.kind === 'file') {
+    return attachment.source ? t('status.uploadReadyWithMessage') : t('status.uploadAutoFile');
   }
 
   if (!attachment.source) return t('status.uploadAutoAudio');
@@ -4081,6 +4120,12 @@ async function ensurePendingUploadsReady() {
 function buildUploadProgressMessage(attachment, index) {
   if (attachment.kind === 'audio') {
     return t('status.uploadingAudio', { index: index + 1, total: state.pendingUploads.length });
+  }
+  if (attachment.kind === 'video') {
+    return t('status.uploadingVideo', { index: index + 1, total: state.pendingUploads.length });
+  }
+  if (attachment.kind === 'file') {
+    return t('status.uploadingFile', { index: index + 1, total: state.pendingUploads.length });
   }
   return t('status.uploadingImage', { index: index + 1, total: state.pendingUploads.length });
 }
@@ -4448,11 +4493,20 @@ function detectAttachmentKind(file) {
   const mimeType = String(file?.type || '').toLowerCase();
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.startsWith('video/')) return 'video';
 
   const filename = String(file?.name || '').toLowerCase();
   if (/\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)$/i.test(filename)) return 'image';
   if (/\.(m4a|mp3|wav|aac|ogg|opus|flac|webm)$/i.test(filename)) return 'audio';
-  return null;
+  if (/\.(mp4|mov|m4v|webm|mkv|avi|3gp)$/i.test(filename)) return 'video';
+  return filename ? 'file' : null;
+}
+
+function defaultMimeTypeForAttachmentKind(kind) {
+  if (kind === 'audio') return 'audio/m4a';
+  if (kind === 'video') return 'video/mp4';
+  if (kind === 'file') return 'application/octet-stream';
+  return 'image/png';
 }
 
 function toggleSettingsPanel(open) {
@@ -4587,7 +4641,7 @@ function renderProjectInfo() {
     settingsAboutSummaryEl.textContent = t('text.projectSummary');
   }
   if (settingsVersionValueEl) {
-    settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.7';
+    settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.8';
   }
   if (settingsGithubLinkEl) {
     settingsGithubLinkEl.href = state.projectInfo.githubUrl;

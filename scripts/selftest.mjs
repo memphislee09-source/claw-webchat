@@ -1,9 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { groupMessageBlocksForRender, parseTextIntoBlocks } from '../public/message-blocks.js';
 
+const execFileAsync = promisify(execFile);
 const base = process.env.OPENCLAW_WEBCHAT_BASE || 'http://127.0.0.1:3770';
+const openclawBin = process.env.OPENCLAW_BIN || 'openclaw';
 const agentId = process.env.OPENCLAW_WEBCHAT_TEST_AGENT || 'mira';
 const sessionKey = `openclaw-webchat:${agentId}`;
 const requestTimeoutMs = Number(process.env.OPENCLAW_WEBCHAT_SELFTEST_REQUEST_TIMEOUT_MS || 150000);
@@ -17,6 +21,7 @@ const bindingsFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
 const profilesFile = process.env.OPENCLAW_WEBCHAT_DATA_DIR
   ? path.join(path.resolve(process.env.OPENCLAW_WEBCHAT_DATA_DIR), 'agent-profiles.json')
   : defaultProfilesFile;
+const uploadsDir = path.join(path.dirname(bindingsFile), 'uploads');
 
 const unique = `selftest-${Date.now()}`;
 
@@ -35,6 +40,8 @@ await checkSessionVoiceApi();
 await checkSlashCommands();
 await checkUpload();
 await checkAudioUpload();
+await checkFileUpload();
+await checkUpstreamAttachmentMaterialization();
 await checkSend();
 await checkReset();
 await checkHistory();
@@ -132,7 +139,7 @@ async function checkPageShell() {
   assert(appJs.includes('async function handleConversationNavigationKey(event)'), 'app.js should include keyboard navigation handling for the conversation pane');
   assert(appJs.includes("conversationRefreshNoticeEl.textContent = state.pendingConversationRefreshSyncing"), 'app.js should render a dedicated pending-refresh notice for history readers');
   assert(appJs.includes("const settingsVersionValueEl = document.getElementById('settingsVersionValue');"), 'app.js should bind the About settings version element');
-  assert(appJs.includes("settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.7';"), 'app.js should render the current project version in About settings');
+  assert(appJs.includes("settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.8';"), 'app.js should render the current project version in About settings');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
   assert(css.includes('.command-menu'), 'styles.css should include slash command menu styles');
@@ -338,6 +345,73 @@ async function checkAudioUpload() {
   assert((payload?.upload?.transcriptStatus ?? null) === 'not_requested', 'audio upload selftest should skip transcription explicitly');
   const mediaResponse = await fetch(`${base}${payload.block.url}`);
   assert(mediaResponse.ok, 'uploaded audio url should be readable');
+}
+
+async function checkFileUpload() {
+  const payload = await postJson('/api/openclaw-webchat/uploads', {
+    kind: 'file',
+    filename: 'notes.txt',
+    mimeType: 'text/plain',
+    contentBase64: Buffer.from(`generic-file-${unique}`, 'utf8').toString('base64')
+  });
+  assert(payload?.ok === true, 'file upload should return ok=true');
+  assert(payload?.upload?.source, 'file upload should return stored source');
+  assert(payload.upload.source.startsWith('openclaw-upload:'), 'file upload should return opaque upload source instead of absolute path');
+  assert(payload?.block?.type === 'file', 'file upload should return file block');
+  const mediaResponse = await fetch(`${base}${payload.block.url}`);
+  assert(mediaResponse.ok, 'uploaded file url should be readable');
+  const text = await mediaResponse.text();
+  assert(text.includes(`generic-file-${unique}`), 'uploaded file content should round-trip through the media endpoint');
+}
+
+async function checkUpstreamAttachmentMaterialization() {
+  const imageUpload = await postJson('/api/openclaw-webchat/uploads', {
+    kind: 'image',
+    filename: 'upstream-materialization.png',
+    mimeType: 'image/png',
+    contentBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2W2i8AAAAASUVORK5CYII='
+  });
+  const fileUpload = await postJson('/api/openclaw-webchat/uploads', {
+    kind: 'file',
+    filename: 'upstream-materialization.txt',
+    mimeType: 'text/plain',
+    contentBase64: Buffer.from(`upstream-materialization-file-${unique}`, 'utf8').toString('base64')
+  });
+
+  const prompt = `请只回复 upstream-materialized-${unique}`;
+  const payload = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/send`, {
+    text: prompt,
+    blocks: [
+      {
+        type: 'image',
+        source: imageUpload.upload.source,
+        name: imageUpload.upload.name,
+        mimeType: imageUpload.upload.mimeType,
+        sizeBytes: imageUpload.upload.size
+      },
+      {
+        type: 'file',
+        source: fileUpload.upload.source,
+        name: fileUpload.upload.name,
+        mimeType: fileUpload.upload.mimeType,
+        sizeBytes: fileUpload.upload.size
+      }
+    ]
+  });
+  assert(payload?.message?.role === 'assistant', 'materialization send should still return an assistant message envelope');
+
+  const binding = readBinding(agentId);
+  assert(binding?.upstreamSessionKey, 'materialization check should have an upstreamSessionKey');
+  const upstreamHistory = await gatewayCall('chat.history', { sessionKey: binding.upstreamSessionKey, limit: 20 });
+  const upstreamUserMessage = (Array.isArray(upstreamHistory?.messages) ? upstreamHistory.messages : []).find((message) => (
+    message?.role === 'user' && collectGatewayText(message).includes(prompt)
+  ));
+  assert(upstreamUserMessage, 'upstream history should include the attachment materialization prompt');
+  const upstreamText = collectGatewayText(upstreamUserMessage);
+  assert(!upstreamText.includes(imageUpload.upload.source), 'upstream attachment wrapper should not expose raw image openclaw-upload source');
+  assert(!upstreamText.includes(fileUpload.upload.source), 'upstream attachment wrapper should not expose raw file openclaw-upload source');
+  assert(upstreamText.includes(managedUploadPathFromSource(imageUpload.upload.source)), 'upstream attachment wrapper should include the resolved local image path');
+  assert(upstreamText.includes(managedUploadPathFromSource(fileUpload.upload.source)), 'upstream attachment wrapper should include the resolved local file path');
 }
 
 async function checkAgents() {
@@ -619,6 +693,13 @@ function collectText(message) {
     .join('\n');
 }
 
+function collectGatewayText(message) {
+  return (Array.isArray(message?.content) ? message.content : [])
+    .filter((item) => item?.type === 'text' && item?.text)
+    .map((item) => String(item.text))
+    .join('\n');
+}
+
 async function openSseStream(path) {
   const controller = new AbortController();
   const response = await fetch(`${base}${path}`, {
@@ -721,6 +802,32 @@ async function openSseStream(path) {
 function readBinding(targetAgentId) {
   const bindings = JSON.parse(fs.readFileSync(bindingsFile, 'utf8'));
   return bindings?.[targetAgentId] || null;
+}
+
+function managedUploadPathFromSource(source) {
+  const normalized = String(source || '');
+  assert(normalized.startsWith('openclaw-upload:'), `expected managed upload source, got ${normalized}`);
+  return path.join(uploadsDir, decodeURIComponent(normalized.slice('openclaw-upload:'.length)));
+}
+
+async function gatewayCall(method, params) {
+  const { stdout, stderr } = await execFileAsync(openclawBin, [
+    'gateway',
+    'call',
+    method,
+    '--json',
+    '--timeout',
+    '120000',
+    '--params',
+    JSON.stringify(params || {})
+  ], {
+    cwd: process.cwd(),
+    maxBuffer: 5 * 1024 * 1024
+  });
+
+  const raw = String(stdout || '').trim();
+  assert(raw, `gateway ${method} should return JSON output: ${stderr || '(empty stdout)'}`);
+  return JSON.parse(raw);
 }
 
 function formatLocalDate(date) {

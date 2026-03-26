@@ -7,7 +7,7 @@
 
 ## 项目概览
 - 项目名：`claw-webchat`
-- 当前版本：`0.1.7`（manifest: `0.1.7`）
+- 当前版本：`0.1.8`（manifest: `0.1.8`）
 - 当前主线：`main`
 - 仓库地址：`https://github.com/memphislee09-source/claw-webchat`
 - 项目目标：构建独立于默认 WebUI 的 OpenClaw WebChat，强化历史保留、富媒体体验和多会话稳定性
@@ -51,6 +51,7 @@
   - 输入区右侧保留静态 `T` thinking 控件；当前 session 的模型与完整 thinking level 会显示在聊天头部 agent 名称右侧，点击 `T` 后仍可弹出当前模型可用的 thinking 选项并直接切换
   - 前端已接入 `/api/openclaw-webchat/events` SSE 事件流：agent 列表与当前会话现在优先根据服务端真实变化触发刷新，固定轮询已降为低频兜底而非主同步机制
   - 已新增 Android voice/chat 复用接口：`GET /api/openclaw-webchat/sessions/:sessionKey/events` 会按 session 推送 `ready` / `run.accepted` / `run.state` / `assistant.delta` / `assistant.final` / `assistant.error`，`POST /sessions/:sessionKey/turns` 支持异步 text/voice turn，`POST /sessions/:sessionKey/runs/:runId/abort` 支持 barge-in / 手动停止
+  - 用户附件上传链路已统一为通用 attachment 模型：图片、音频、视频和普通文件都可经同一 `+` 入口上传；本地仍稳定保存 `openclaw-upload:*`，但发送给 upstream agent 前会统一物化成可读取源，不再把 opaque upload id 直接暴露给 agent
   - 对话栏滚动控制已进一步统一：render、媒体延迟加载、历史补页、当前会话刷新与显式跳转现在共用一套 viewport snapshot / restore 逻辑，默认优先保持当前位置，只有显式 follow-bottom 时才自动贴底
   - 对话区头像尺寸已与左栏头像统一，不再因消息区布局出现大小漂移
   - 用户发送后在 agent 处理中阶段保持对话贴底，不再短暂下沉回上一条可见消息
@@ -147,7 +148,7 @@
 - 2026-03-25 已把对话栏统一 viewport 控制器并入 `main`：引入 viewport revision + snapshot/restore 控制器，过期异步回调不会再拿旧锚点回拉视口，当前实现默认优先保持当前位置
 - 2026-03-26 已把缺消息收口并入 `main`：assistant 最终回复判定不再把带 `toolCall` 的进度消息误收为最终答案；会话打开时会对当前 upstream session 做 history reconcile，把已存在 upstream、但本地 JSONL 漏掉的 user / assistant 行回补回来
 - 2026-03-26 已补 Android voice/chat 复用接口：不新增 voice-only session，也不做 WebRTC；voice turn 通过新的 async `/turns` + session SSE + `/runs/{runId}/abort` 接到现有 `openclaw-webchat` 真源，并以普通 user history message 形式同时保留 transcript text block 与 raw audio block
-- 2026-03-26 `main` 当前代码基线已提升到 `0.1.7`；公开 GitHub Release bundle 仍停留在 `0.1.6`
+- 2026-03-27 `main` 当前代码基线已提升到 `0.1.8`；公开 GitHub Release bundle 仍停留在 `0.1.6`
 - 2026-03-24 已补设置面板“关于”版本号显示，并把 thinking 按钮字重收轻，保证它作为工具控件不抢主发送动作
 - 2026-03-22 已完成历史搜索第二阶段首批增强：日期筛选、更大结果集、分词/紧凑匹配排序与结果高亮
 - 2026-03-22 已修复 gateway CLI stdout 被插件诊断日志污染时导致 `/model` / `/think` 失败的问题

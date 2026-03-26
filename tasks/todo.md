@@ -1,6 +1,17 @@
 # Task Todo
 
 ## Current Task
+- [x] Create a dedicated feature branch from `main@432ee3a` for the unified attachment-delivery fix
+- [x] Implement a server-side attachment materialization helper so upstream messages receive agent-readable sources instead of raw `openclaw-upload:*` ids
+- [x] Extend `/api/openclaw-webchat/uploads` beyond image/audio to support generic file attachments while preserving current image/audio metadata behavior
+- [x] Route sync `/send` and async session `/turns` attachment delivery through the same unified materialization path
+- [x] Update the composer upload path to support generic files without regressing existing image/audio flows
+- [x] Add regression coverage for real frontend-style attachment sends so upstream `chat.history` no longer contains raw `openclaw-upload:*` identifiers
+- [x] Verify with `npm run check` and `npm run selftest` before considering merge
+- [x] Investigate why image and other attachments can be uploaded in WebChat but agents only receive a placeholder instead of readable content
+- [x] Trace the attachment flow across `/uploads`, local history persistence, present-block normalization, and upstream message construction
+- [x] Compare the payload that WebChat stores/renders with the payload actually delivered to the upstream agent session for image attachments
+- [x] Form a concrete root-cause hypothesis with evidence and propose a fix plan for discussion before implementation
 - [x] Add an Android-agent handoff doc that explains how to integrate with the new voice session API
 - [x] Verify the new Android-agent handoff doc matches the shipped server behavior and sample payloads
 - [x] Read the Android voice session API spec and map it to the current `openclaw-webchat` server architecture
@@ -60,6 +71,37 @@
 - [x] Verify merged `main`, update baseline notes, and push the new mainline commit to GitHub
 
 ## Current Review
+- The branch has now been version-bumped to `0.1.8`, including `package.json`, the top-level `package-lock.json` metadata, server/app version fallbacks, and the public docs that surface the current branch version.
+- `README.md`, `status.md`, `docs/HANDOFF-2026-03-24.md`, and `CHANGELOG.md` now record the unified attachment-delivery work as mainline behavior: generic attachment uploads, server-side upstream source materialization, and the continued distinction between stable local `openclaw-upload:*` storage and agent-readable delivery sources.
+- Release verification for the `0.1.8` branch state passed with:
+  - `npm run check`
+  - `launchctl kickstart -k gui/$(id -u)/ai.openclaw.webchat`
+  - `curl -sf http://127.0.0.1:3770/healthz`
+  - `curl -sf http://127.0.0.1:3770/api/openclaw-webchat/settings` returning `.projectInfo.version == 0.1.8`
+  - `npm run selftest`
+- Unified attachment-delivery fix is now implemented on branch `codex/unified-attachment-delivery`.
+- Uploads now support generic attachment kinds in addition to the existing image/audio path, while local persistence still keeps `openclaw-upload:*` as the stable source of truth.
+- The upstream-send path no longer forwards raw `openclaw-upload:*` ids. Managed uploads and signed WebChat media URLs are materialized into agent-readable local file paths at send time, while direct `http/https` sources still pass through unchanged.
+- The attachment wrapper sent to upstream now explicitly says the listed sources are directly readable by the runtime, and includes consistent metadata such as mime type, byte size, and media duration where relevant.
+- The composer upload entry point now accepts generic attachments instead of only image/audio, and pending-upload UI copy/hints cover image, audio, video, and generic file cases without regressing the existing audio transcription flow.
+- Regression coverage now includes:
+  - generic `file` uploads through `/api/openclaw-webchat/uploads`
+  - a real frontend-style `/send` that passes `openclaw-upload:*` sources, then verifies upstream `chat.history` contains resolved local attachment paths instead of opaque upload ids
+- Verification passed with:
+  - `npm run check`
+  - `launchctl kickstart -k gui/$(id -u)/ai.openclaw.webchat`
+  - `curl -sf http://127.0.0.1:3770/healthz`
+  - `npm run selftest`
+- Attachment receive investigation result for the reported `wangyuyan` image send around 2026-03-26 19:55 CST:
+  - Local WebChat history persisted the user turn correctly as `text + image` blocks with the stable upload source `openclaw-upload:1774526111174-1dffb33890c3-image-15939.jpg`.
+  - The upstream `chat.history` entry for the same turn proves `buildUpstreamMessage(...)` flattened that attachment into plain text only:
+    `- image: image-15939.jpg (openclaw-upload:1774526111174-1dffb33890c3-image-15939.jpg)`.
+  - `wangyuyan` then explicitly reported it could only see the filename and upload identifier, and upstream tool calls show it unsuccessfully tried to locate/open that opaque `openclaw-upload:` value as if it were a real file.
+  - Root cause: WebChat keeps the opaque upload source as the canonical stored value, but the upstream-send path forwards that opaque identifier verbatim instead of resolving it to an agent-readable local path or other readable media source first.
+  - A contrasting local repro under `mira` showed that when the outgoing attachment source was already a readable `/api/openclaw-webchat/media?token=...` URL, the upstream user message reflected that readable source instead of `openclaw-upload:...`.
+  - Important constraint: changing clients to send signed `/api/openclaw-webchat/media?...` URLs directly is the wrong layer, because those URLs are short-lived, can be blocked by optional light auth, and would break the current stable `upload.upload.source` / Android voice contract.
+  - Proposed fix direction for discussion: keep local persistence and public API contracts unchanged (`openclaw-upload:*` remains the stable stored source), but add a server-side upstream materialization step inside `buildUpstreamMessage(...)` so uploaded attachments are resolved to an agent-readable source at send time. Prefer resolved absolute local file paths for managed uploads so the path survives light-auth setups and does not depend on expiring signed URLs; keep direct `http/https` sources as-is.
+  - Proposed regression coverage after implementation: verify that a real frontend-style upload/send no longer emits `openclaw-upload:` inside upstream `chat.history`, and add a focused check around the source-materialization helper so future refactors cannot regress this edge.
 - Android voice session API follow-up is now implemented on top of the existing `openclaw-webchat` session/history truth:
   `GET /api/openclaw-webchat/sessions/{sessionKey}/events`, `POST /sessions/{sessionKey}/turns`, and
   `POST /sessions/{sessionKey}/runs/{runId}/abort` are live without introducing WebRTC or a second voice-only session model.

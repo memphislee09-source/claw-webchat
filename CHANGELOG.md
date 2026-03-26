@@ -6,11 +6,16 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-03-27
+
 ### Added
 - Add a session-scoped voice/chat run API for Android integration without introducing a second source of truth: `GET /api/openclaw-webchat/sessions/{sessionKey}/events` now streams `ready`, `run.accepted`, `run.state`, `assistant.delta`, `assistant.final`, and `assistant.error`, while `POST /sessions/{sessionKey}/turns` accepts asynchronous text/voice turns and `POST /sessions/{sessionKey}/runs/{runId}/abort` stops an active run idempotently
+- Extend user uploads beyond image/audio so generic attachments can be staged locally, rendered in chat, and delivered through the same WebChat send path
 
 ### Changed
 - Preserve audio `durationMs` through uploads, local history persistence, and presented message blocks so voice-originated user turns retain both transcript text and raw audio metadata in normal chat history
+- Materialize managed WebChat uploads into agent-readable sources before forwarding them upstream, so the wrapper message now carries readable local paths instead of raw `openclaw-upload:*` identifiers
+- Expand the composer upload entry point and pending-upload UI from image/audio-only behavior to a unified attachment flow covering image, audio, video, and generic file cases
 
 ## [0.1.7] - 2026-03-26
 

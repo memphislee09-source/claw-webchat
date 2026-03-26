@@ -18,7 +18,7 @@ Language / 语言: [简体中文](#zh-cn) | [English](#en)
 `Claw WebChat` 是一个独立于 OpenClaw 默认 WebUI 的 WebChat 项目，面向长期使用的 agent 对话场景。它强调长期历史保留、富媒体体验、多 agent 隔离，以及更直接的模型与 Think 切换体验。
 
 ### 项目状态
-- 当前版本：`0.1.7`
+- 当前版本：`0.1.8`
 - 默认开发分支：`main`
 - 当前稳定性：`alpha`
 - 推荐部署方式：本机或带访问控制的私有网络
@@ -29,7 +29,7 @@ Language / 语言: [简体中文](#zh-cn) | [English](#en)
 - 本地用 JSONL 保存可显示历史，而不是依赖上游内部日志格式
 - `/new` 只重置上游上下文，不清空本地可回看的历史
 - 原生支持图片、音频、视频、Markdown 文件和普通文件展示
-- 支持用户图片上传、音频上传，以及可选的本地 Whisper 转写
+- 支持用户通用附件上传；音频默认可选本地 Whisper 转写，图片/视频/普通文件走同一附件链路
 - 支持常用本地 slash 命令与 agent 级模型切换
 - 支持当前 agent 历史搜索、命中跳转和关键词高亮
 - 支持发送/停止双态按钮，直接中止当前 agent 任务
@@ -80,6 +80,7 @@ curl http://127.0.0.1:3770/healthz
 - 稳定的 `agentId -> session` 绑定
 - 本地 JSONL 历史与可见消息时间线
 - 富媒体解析，兼容结构化 block 与 `MEDIA:` / `mediaUrl:` fallback
+- 统一附件投递链路：本地稳定保存 `openclaw-upload:*`，发送给 agent 前再物化成可读取源
 - 当前 agent 历史搜索，支持跳转和高亮
 - `/model` / `/models` 模型选择器，完整 provider 分组、暖启动更快
 - `T:*` Think 快捷切换，按模型感知可用等级
@@ -184,7 +185,7 @@ npm run bundle
 `Claw WebChat` is a standalone WebChat for long-lived OpenClaw agent workflows. It focuses on durable local history, rich media support, multi-agent isolation, and more direct model / Think switching than the default OpenClaw Web UI.
 
 ### Project Status
-- Current version: `0.1.7`
+- Current version: `0.1.8`
 - Default branch: `main`
 - Stability: `alpha`
 - Recommended deployment: local machine or private network with access control
@@ -195,7 +196,7 @@ npm run bundle
 - Store renderable history locally in JSONL instead of depending on upstream internal logs
 - Preserve local history across `/new` while resetting only upstream context
 - Support images, audio, video, Markdown files, and regular files inside chat
-- Support user image upload, audio upload, and optional local Whisper transcription
+- Support generic user attachment upload; audio keeps optional local Whisper transcription while image, video, and regular files share the same attachment path
 - Support local slash commands and agent-scoped model switching
 - Support timeline search, jump-to-hit, and keyword highlighting
 - Support a send/stop dual-state composer button for aborting the current run
@@ -243,6 +244,7 @@ curl http://127.0.0.1:3770/healthz
 - Stable `agentId -> session` binding
 - Local JSONL history and visible-message timeline
 - Rich media parsing with structured blocks plus `MEDIA:` / `mediaUrl:` fallbacks
+- Unified attachment delivery: keep stable local `openclaw-upload:*` sources, then materialize them into agent-readable sources before upstream send
 - Timeline search with jump-to-hit and highlight
 - `/model` / `/models` picker with complete provider-grouped lists and faster warm reopen
 - `T:*` Think quick switch with model-aware options
