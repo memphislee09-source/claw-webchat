@@ -195,7 +195,8 @@ function normalizeBlock(block) {
     transcriptStatus: normalizeOptionalString(block.transcriptStatus) || undefined,
     transcriptText: normalizeOptionalString(block.transcriptText || block.transcript) || undefined,
     transcriptError: normalizeOptionalString(block.transcriptError) || undefined,
-    sizeBytes: Number.isFinite(Number(block.sizeBytes || block.size)) ? Number(block.sizeBytes || block.size) : undefined
+    sizeBytes: Number.isFinite(Number(block.sizeBytes || block.size)) ? Number(block.sizeBytes || block.size) : undefined,
+    durationMs: Number.isFinite(Number(block.durationMs)) ? Number(block.durationMs) : undefined
   };
 }
 

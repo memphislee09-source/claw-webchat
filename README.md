@@ -48,6 +48,9 @@ Language / 语言: [简体中文](#zh-cn) | [English](#en)
 #### 发布前检查
 - 对外推荐前请先过一遍 [`docs/PUBLIC_RELEASE_CHECKLIST.md`](docs/PUBLIC_RELEASE_CHECKLIST.md)
 
+#### Android 语音接入
+- Android 侧替换 gateway-direct voice 路径时，请直接按 [`docs/ANDROID_VOICE_AGENT_INTEGRATION.md`](docs/ANDROID_VOICE_AGENT_INTEGRATION.md) 对接现有 `openclaw-webchat` session/history 真源
+
 ### 快速开始
 #### 前置要求
 - Node.js `20+`

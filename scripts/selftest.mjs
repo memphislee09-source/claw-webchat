@@ -31,6 +31,7 @@ await checkAgents();
 await checkAgentProfile();
 await checkOpenAgent();
 await checkStopEndpoint();
+await checkSessionVoiceApi();
 await checkSlashCommands();
 await checkUpload();
 await checkAudioUpload();
@@ -181,6 +182,12 @@ async function checkBootstrapContract() {
   const appJs = fs.readFileSync(defaultAppFile, 'utf8');
   assert(serverJs.includes("const BOOTSTRAP_VERSION = '2026-03-25.media-v2';"), 'server bootstrap version should reflect the latest media guidance refresh');
   assert(serverJs.includes("app.get('/api/openclaw-webchat/events', (req, res) => {"), 'server should expose an SSE events endpoint for event-driven refresh');
+  assert(serverJs.includes("app.get('/api/openclaw-webchat/sessions/:sessionKey/events', (req, res) => {"), 'server should expose a session-scoped SSE events endpoint for voice/chat runs');
+  assert(serverJs.includes("app.post('/api/openclaw-webchat/sessions/:sessionKey/turns', async (req, res) => {"), 'server should expose async session turn submission');
+  assert(serverJs.includes("app.post('/api/openclaw-webchat/sessions/:sessionKey/runs/:runId/abort', async (req, res) => {"), 'server should expose explicit run abort routing');
+  assert(serverJs.includes('function emitSessionEvent(sessionKey, event, payload = {}) {'), 'server should maintain a session-scoped SSE event pipeline');
+  assert(serverJs.includes('function acceptAsyncSessionTurn(binding, body) {'), 'server should accept asynchronous text/voice turns');
+  assert(serverJs.includes('function validateAsyncTurnBlocks({ mode, userBlocks }) {'), 'server should validate voice turns contain transcript and raw audio blocks');
   assert(serverJs.includes("broadcastEventStream('agent-update'"), 'server should broadcast agent updates onto the SSE stream');
   assert(serverJs.includes("broadcastEventStream('conversation-update'"), 'server should broadcast conversation updates onto the SSE stream');
   assert(serverJs.includes('const HISTORY_RECONCILE_FETCH_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_LIMIT || 200);'), 'server should define an open-time upstream history reconciliation fetch limit');
@@ -318,6 +325,7 @@ async function checkAudioUpload() {
     kind: 'audio',
     filename: 'tiny.wav',
     mimeType: 'audio/wav',
+    durationMs: 2140,
     transcribe: false,
     contentBase64: 'UklGRmQGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YUAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
   });
@@ -325,7 +333,9 @@ async function checkAudioUpload() {
   assert(payload?.upload?.source, 'audio upload should return stored source');
   assert(payload.upload.source.startsWith('openclaw-upload:'), 'audio upload should return opaque upload source instead of absolute path');
   assert(payload?.block?.type === 'audio', 'audio upload should return audio block');
-  assert((payload?.upload?.transcriptStatus ?? null) === null, 'audio upload selftest should skip transcription');
+  assert(payload?.upload?.durationMs === 2140, 'audio upload should return durationMs when provided');
+  assert(payload?.block?.durationMs === 2140, 'audio block should preserve durationMs');
+  assert((payload?.upload?.transcriptStatus ?? null) === 'not_requested', 'audio upload selftest should skip transcription explicitly');
   const mediaResponse = await fetch(`${base}${payload.block.url}`);
   assert(mediaResponse.ok, 'uploaded audio url should be readable');
 }
@@ -370,6 +380,131 @@ async function checkStopEndpoint() {
   assert(payload?.ok === true, 'stop endpoint should return ok=true');
   assert(typeof payload?.aborted === 'boolean', 'stop endpoint should expose aborted flag');
   assert(Array.isArray(payload?.runIds), 'stop endpoint should expose runIds array');
+}
+
+async function checkSessionVoiceApi() {
+  const stream = await openSseStream(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/events?mode=voice`);
+  const readyEvent = await stream.waitFor((event) => event.event === 'ready' && event.payload?.sessionKey === sessionKey);
+  assert(readyEvent?.payload?.streamVersion === 1, 'session event stream should expose streamVersion=1');
+
+  const upload = await postJson('/api/openclaw-webchat/uploads', {
+    kind: 'audio',
+    filename: 'voice-turn-selftest.wav',
+    mimeType: 'audio/wav',
+    durationMs: 2140,
+    transcribe: false,
+    contentBase64: 'UklGRmQGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YUAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+  });
+  const clientTurnId = `voice-${unique}`;
+  const requestedText = `请只回复 ${unique} voice`;
+  const accepted = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/turns`, {
+    clientTurnId,
+    mode: 'voice',
+    text: requestedText,
+    blocks: [
+      { type: 'text', text: requestedText },
+      {
+        type: 'audio',
+        source: upload.upload.source,
+        name: upload.upload.name,
+        mimeType: upload.upload.mimeType,
+        sizeBytes: upload.upload.size,
+        durationMs: upload.upload.durationMs
+      }
+    ],
+    transcript: {
+      text: requestedText,
+      source: 'selftest',
+      locale: 'zh-CN',
+      isFinal: true
+    },
+    response: {
+      stream: true,
+      thinking: 'low'
+    },
+    interrupt: {
+      policy: 'abort_previous_if_running'
+    },
+    client: {
+      platform: 'selftest',
+      app: 'claw-webchat-selftest',
+      appVersion: '1.0.0'
+    }
+  });
+  assert(accepted?.ok === true, 'async voice turn should return ok=true');
+  assert(accepted?.accepted === true, 'async voice turn should return accepted=true');
+  assert(accepted?.runId, 'async voice turn should return runId');
+  assert(accepted?.userMessageId, 'async voice turn should return userMessageId');
+  assert(accepted?.status === 'queued', 'async voice turn should return queued status');
+
+  const duplicate = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/turns`, {
+    clientTurnId,
+    mode: 'voice',
+    text: requestedText,
+    blocks: [
+      { type: 'text', text: requestedText },
+      {
+        type: 'audio',
+        source: upload.upload.source,
+        name: upload.upload.name,
+        mimeType: upload.upload.mimeType,
+        sizeBytes: upload.upload.size,
+        durationMs: upload.upload.durationMs
+      }
+    ],
+    transcript: {
+      text: requestedText,
+      source: 'selftest',
+      locale: 'zh-CN',
+      isFinal: true
+    },
+    response: {
+      stream: true,
+      thinking: 'low'
+    },
+    interrupt: {
+      policy: 'abort_previous_if_running'
+    }
+  });
+  assert(duplicate?.runId === accepted.runId, 'duplicate clientTurnId should return the original runId');
+  assert(duplicate?.userMessageId === accepted.userMessageId, 'duplicate clientTurnId should return the original userMessageId');
+
+  const acceptedEvent = await stream.waitFor((event) => event.event === 'run.accepted' && event.payload?.runId === accepted.runId);
+  assert(acceptedEvent?.payload?.clientTurnId === clientTurnId, 'run.accepted should include clientTurnId');
+  const runningEvent = await stream.waitFor((event) => event.event === 'run.state' && event.payload?.runId === accepted.runId && event.payload?.state === 'running');
+  assert(runningEvent?.payload?.sessionKey === sessionKey, 'run.state should include sessionKey');
+  const finalEvent = await stream.waitFor((event) => event.event === 'assistant.final' && event.payload?.runId === accepted.runId, requestTimeoutMs + 120000);
+  const finalText = collectText(finalEvent?.payload?.message);
+  assert(finalText.trim().length > 0, 'assistant.final should contain non-empty assistant text');
+  const finalState = await stream.waitFor((event) => event.event === 'run.state' && event.payload?.runId === accepted.runId && event.payload?.state === 'final');
+  assert(finalState?.payload?.state === 'final', 'successful async run should emit final terminal state');
+
+  const history = await getJson(`/api/openclaw-webchat/agents/${encodeURIComponent(agentId)}/history?limit=20`);
+  const voiceUserMessage = history.messages.find((message) => message.id === accepted.userMessageId);
+  assert(voiceUserMessage?.role === 'user', 'voice-originated turn should appear as a normal user history message');
+  assert(voiceUserMessage.blocks.some((block) => block.type === 'text' && String(block.text || '') === requestedText), 'voice-originated user message should keep transcript text block');
+  assert(voiceUserMessage.blocks.some((block) => block.type === 'audio' && block.durationMs === 2140), 'voice-originated user message should keep raw audio block with durationMs');
+
+  const abortTurnId = `voice-abort-${unique}`;
+  const abortAccepted = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/turns`, {
+    clientTurnId: abortTurnId,
+    mode: 'text',
+    text: '请从 1 数到 500，每行一个数字，不要解释。',
+    response: {
+      stream: true
+    },
+    interrupt: {
+      policy: 'abort_previous_if_running'
+    }
+  });
+  assert(abortAccepted?.runId, 'abort selftest should return runId');
+  const abortPayload = await postJson(`/api/openclaw-webchat/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(abortAccepted.runId)}/abort`, {});
+  assert(abortPayload?.ok === true, 'run abort should return ok=true');
+  assert(abortPayload?.state === 'aborted', 'run abort should return aborted state');
+  const abortedEvent = await stream.waitFor((event) => event.event === 'run.state' && event.payload?.runId === abortAccepted.runId && event.payload?.state === 'aborted');
+  assert(abortedEvent?.payload?.state === 'aborted', 'run abort should emit run.state aborted');
+
+  stream.close();
 }
 
 async function checkSlashCommands() {
@@ -482,6 +617,105 @@ function collectText(message) {
     .filter((block) => block.type === 'text')
     .map((block) => String(block.text || ''))
     .join('\n');
+}
+
+async function openSseStream(path) {
+  const controller = new AbortController();
+  const response = await fetch(`${base}${path}`, {
+    headers: { accept: 'text/event-stream' },
+    signal: controller.signal
+  });
+  assert(response.ok, `SSE ${path} failed: ${response.status}`);
+  assert(response.body, `SSE ${path} should return a body stream`);
+
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  const events = [];
+  const waiters = [];
+  let buffer = '';
+  let closed = false;
+
+  const flushWaiters = () => {
+    for (let index = waiters.length - 1; index >= 0; index -= 1) {
+      const waiter = waiters[index];
+      const matched = events.find(waiter.predicate);
+      if (!matched) continue;
+      clearTimeout(waiter.timeoutId);
+      waiters.splice(index, 1);
+      waiter.resolve(matched);
+    }
+  };
+
+  const parseEventBlock = (block) => {
+    let event = 'message';
+    let id = null;
+    const dataLines = [];
+    for (const line of block.split('\n')) {
+      if (!line || line.startsWith(':')) continue;
+      if (line.startsWith('event:')) {
+        event = line.slice(6).trim();
+        continue;
+      }
+      if (line.startsWith('id:')) {
+        id = line.slice(3).trim();
+        continue;
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (!dataLines.length) return null;
+    let payload = null;
+    const raw = dataLines.join('\n');
+    try { payload = JSON.parse(raw); } catch { payload = { raw }; }
+    return { id, event, payload };
+  };
+
+  const pump = (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let splitIndex = buffer.indexOf('\n\n');
+        while (splitIndex >= 0) {
+          const rawBlock = buffer.slice(0, splitIndex);
+          buffer = buffer.slice(splitIndex + 2);
+          const parsed = parseEventBlock(rawBlock.replace(/\r/g, ''));
+          if (parsed) {
+            events.push(parsed);
+            flushWaiters();
+          }
+          splitIndex = buffer.indexOf('\n\n');
+        }
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError') throw error;
+    } finally {
+      closed = true;
+      flushWaiters();
+    }
+  })();
+
+  return {
+    async waitFor(predicate, timeoutMs = requestTimeoutMs) {
+      const matched = events.find(predicate);
+      if (matched) return matched;
+      if (closed) throw new Error(`SSE stream ${path} closed before matching event arrived`);
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          const index = waiters.findIndex((item) => item.timeoutId === timeoutId);
+          if (index >= 0) waiters.splice(index, 1);
+          reject(new Error(`Timed out waiting for SSE event on ${path}`));
+        }, timeoutMs);
+        waiters.push({ predicate, resolve, reject, timeoutId });
+      });
+    },
+    close() {
+      controller.abort();
+    },
+    done: pump
+  };
 }
 
 function readBinding(targetAgentId) {

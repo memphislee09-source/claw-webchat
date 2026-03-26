@@ -1,6 +1,17 @@
 # Task Todo
 
 ## Current Task
+- [x] Add an Android-agent handoff doc that explains how to integrate with the new voice session API
+- [x] Verify the new Android-agent handoff doc matches the shipped server behavior and sample payloads
+- [x] Read the Android voice session API spec and map it to the current `openclaw-webchat` server architecture
+- [x] Design a session-scoped async run model that reuses the existing chat session/history source of truth
+- [x] Add `GET /api/openclaw-webchat/sessions/{sessionKey}/events` SSE with `ready`, `run.accepted`, `run.state`, `assistant.delta`, `assistant.final`, and `assistant.error`
+- [x] Add `POST /api/openclaw-webchat/sessions/{sessionKey}/turns` with idempotent async acceptance and voice/text block persistence
+- [x] Add `POST /api/openclaw-webchat/sessions/{sessionKey}/runs/{runId}/abort` with idempotent run-state handling
+- [x] Ensure voice-originated turns persist as normal chat history containing both transcript text and raw audio blocks
+- [x] Keep `agents/{agentId}/open` and `agents/{agentId}/history` compatible with the new voice-originated messages
+- [x] Add or extend self-tests for the voice session API contract and run lifecycle
+- [x] Verify with project checks and capture example responses for Android handoff
 - [x] Confirm the active worktree is `/Users/memphis/.openclaw/workspace-mira/claw-webchat`
 - [x] Re-read the core project docs (`status.md`, latest handoff, architecture, roadmap, requirements, error log, README, package manifest)
 - [x] Reconfirm the development baseline, naming constraints, and current branch/remote state
@@ -49,6 +60,18 @@
 - [x] Verify merged `main`, update baseline notes, and push the new mainline commit to GitHub
 
 ## Current Review
+- Android voice session API follow-up is now implemented on top of the existing `openclaw-webchat` session/history truth:
+  `GET /api/openclaw-webchat/sessions/{sessionKey}/events`, `POST /sessions/{sessionKey}/turns`, and
+  `POST /sessions/{sessionKey}/runs/{runId}/abort` are live without introducing WebRTC or a second voice-only session model.
+- Session-scoped SSE now keeps per-session ordering and emits `ready`, `run.accepted`, `run.state`, `assistant.delta`,
+  `assistant.final`, and `assistant.error`; reconnect can replay recent session events via `cursor` / `Last-Event-ID`.
+- Async voice turns are idempotent by `clientTurnId`, preserve a normal user history row with both transcript text and
+  raw audio blocks, and reuse the same agent history returned by `agents/{agentId}/open` and `agents/{agentId}/history`.
+- Audio uploads now preserve `durationMs` in both the upload response and persisted/presented history blocks, which keeps
+  the Android-side voice clip metadata intact.
+- Verification passed with `npm run check`, `launchctl kickstart -k gui/$(id -u)/ai.openclaw.webchat`, and
+  `npm run selftest`, including live coverage for the new session event stream, async `/turns`, duplicate
+  `clientTurnId` idempotency, voice history persistence, and `/runs/{runId}/abort`.
 - Verified the active repository is `claw-webchat` at `/Users/memphis/.openclaw/workspace-mira/claw-webchat`.
 - Verified `main` is the only development baseline; local `HEAD` and `origin/main` both point to `f4c8bd8`
   (`docs: record shared dev repo bootstrap`), while `ee656ce` is no longer the latest pushed commit.

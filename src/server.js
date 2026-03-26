@@ -54,7 +54,10 @@ const RESTART_LABEL = normalizeOptionalString(process.env.OPENCLAW_WEBCHAT_LAUNC
   || normalizeOptionalString(process.env.XPC_SERVICE_NAME)
   || 'ai.openclaw.webchat';
 const EVENT_STREAM_RETRY_MS = Number(process.env.OPENCLAW_WEBCHAT_EVENT_STREAM_RETRY_MS || 3000);
-const EVENT_STREAM_KEEPALIVE_MS = Number(process.env.OPENCLAW_WEBCHAT_EVENT_STREAM_KEEPALIVE_MS || 20000);
+const EVENT_STREAM_KEEPALIVE_MS = Number(process.env.OPENCLAW_WEBCHAT_EVENT_STREAM_KEEPALIVE_MS || 12000);
+const SESSION_EVENT_STREAM_VERSION = 1;
+const SESSION_EVENT_BACKLOG_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_SESSION_EVENT_BACKLOG_LIMIT || 200);
+const SESSION_RUN_TIMEOUT_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_RUN_TIMEOUT_MS || ASSISTANT_LATE_REPLY_TIMEOUT_MS);
 const lateReplyReconciliations = new Set();
 const authSessions = new Map();
 const activeTurnControllers = new Map();
@@ -63,6 +66,10 @@ const ABORTED_ASSISTANT_REPLY = Symbol('openclaw-webchat-aborted-assistant-reply
 const gatewayModelsCache = { value: null, expiresAt: 0, promise: null };
 const gatewaySessionsCache = { value: null, expiresAt: 0, promise: null };
 const eventStreamClients = new Map();
+const sessionEventClients = new Map();
+const sessionEventBacklogs = new Map();
+const sessionEventSequences = new Map();
+const sessionRunStates = new Map();
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -191,6 +198,48 @@ app.get('/api/openclaw-webchat/events', (req, res) => {
   });
 });
 
+app.get('/api/openclaw-webchat/sessions/:sessionKey/events', (req, res) => {
+  const sessionBinding = getBindingBySessionKey(req.params.sessionKey);
+  if (!sessionBinding) {
+    return sendApiError(res, 404, 'session_not_found', 'Session not found.', false);
+  }
+
+  const sessionKey = sessionBinding.sessionKey;
+  const runtime = ensureSessionRunRuntime(sessionKey);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const clientId = cryptoId();
+  const keepalive = setInterval(() => {
+    writeEventStreamChunk(res, ': keepalive\n\n');
+  }, EVENT_STREAM_KEEPALIVE_MS);
+
+  if (!sessionEventClients.has(sessionKey)) {
+    sessionEventClients.set(sessionKey, new Map());
+  }
+  sessionEventClients.get(sessionKey).set(clientId, { res, keepalive });
+  writeEventStreamChunk(res, `retry: ${EVENT_STREAM_RETRY_MS}\n\n`);
+  sendEventStreamEvent(res, 'ready', {
+    sessionKey,
+    streamVersion: SESSION_EVENT_STREAM_VERSION,
+    mode: normalizeOptionalString(req.query.mode) || 'chat'
+  });
+
+  const cursor = coerceSessionEventCursor(req.query.cursor || req.headers['last-event-id']);
+  if (cursor !== null) {
+    replaySessionEventBacklog(res, sessionKey, cursor);
+  } else if (runtime.activeRunId) {
+    sendActiveSessionRunSnapshot(res, sessionKey, runtime.activeRunId);
+  }
+
+  req.on('close', () => {
+    closeSessionEventClient(sessionKey, clientId);
+  });
+});
+
 app.get('/api/openclaw-webchat/agents', async (_req, res) => {
   try {
     const agents = await listAgents();
@@ -311,6 +360,36 @@ app.post('/api/openclaw-webchat/sessions/:sessionKey/send', async (req, res) => 
   }
 });
 
+app.post('/api/openclaw-webchat/sessions/:sessionKey/turns', async (req, res) => {
+  const sessionBinding = getBindingBySessionKey(req.params.sessionKey);
+  if (!sessionBinding) {
+    return sendApiError(res, 404, 'session_not_found', 'Session not found.', false);
+  }
+
+  try {
+    const accepted = await acceptAsyncSessionTurn(sessionBinding, req.body || {});
+    res.json({
+      ok: true,
+      accepted: true,
+      sessionKey: accepted.sessionKey,
+      clientTurnId: accepted.clientTurnId,
+      userMessageId: accepted.userMessageId,
+      runId: accepted.runId,
+      status: accepted.status
+    });
+  } catch (error) {
+    const apiError = normalizeApiError(error);
+    res.status(apiError.status).json({
+      ok: false,
+      error: {
+        code: apiError.code,
+        message: apiError.message,
+        retryable: apiError.retryable
+      }
+    });
+  }
+});
+
 app.post('/api/openclaw-webchat/sessions/:sessionKey/stop', async (req, res) => {
   const { sessionKey } = req.params;
   const sessionBinding = getBindingBySessionKey(sessionKey);
@@ -327,6 +406,36 @@ app.post('/api/openclaw-webchat/sessions/:sessionKey/stop', async (req, res) => 
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: formatError(error) });
+  }
+});
+
+app.post('/api/openclaw-webchat/sessions/:sessionKey/runs/:runId/abort', async (req, res) => {
+  const sessionBinding = getBindingBySessionKey(req.params.sessionKey);
+  if (!sessionBinding) {
+    return sendApiError(res, 404, 'session_not_found', 'Session not found.', false);
+  }
+
+  try {
+    const run = await abortSessionRun(sessionBinding, req.params.runId);
+    if (!run) {
+      return sendApiError(res, 404, 'run_not_found', 'Run not found.', false);
+    }
+    res.json({
+      ok: true,
+      sessionKey: sessionBinding.sessionKey,
+      runId: run.runId,
+      state: run.state
+    });
+  } catch (error) {
+    const apiError = normalizeApiError(error);
+    res.status(apiError.status).json({
+      ok: false,
+      error: {
+        code: apiError.code,
+        message: apiError.message,
+        retryable: apiError.retryable
+      }
+    });
   }
 });
 
@@ -625,6 +734,7 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
   const mimeType = normalizeOptionalString(req.body?.mimeType) || 'application/octet-stream';
   const contentBase64 = normalizeOptionalString(req.body?.contentBase64);
   const transcribe = req.body?.transcribe !== false;
+  const durationMs = Number.isFinite(Number(req.body?.durationMs)) ? Math.max(0, Math.round(Number(req.body.durationMs))) : null;
 
   if (!['image', 'audio'].includes(kind)) {
     return res.status(400).json({ error: 'Only image and audio uploads are supported right now.' });
@@ -655,7 +765,8 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
       source: stored.filePath,
       name: stored.displayName,
       mimeType,
-      sizeBytes: buffer.byteLength
+      sizeBytes: buffer.byteLength,
+      durationMs: kind === 'audio' ? durationMs : undefined
     };
 
     if (kind === 'audio' && transcribe) {
@@ -667,6 +778,8 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
         block.transcriptStatus = 'failed';
         block.transcriptError = transcription.error;
       }
+    } else if (kind === 'audio') {
+      block.transcriptStatus = 'not_requested';
     }
 
     res.json({
@@ -677,6 +790,7 @@ app.post('/api/openclaw-webchat/uploads', async (req, res) => {
         name: stored.displayName,
         size: buffer.byteLength,
         mimeType,
+        durationMs: kind === 'audio' ? durationMs : null,
         transcriptStatus: block.transcriptStatus || null,
         transcriptText: block.transcriptText || null,
         transcriptError: block.transcriptError || null
@@ -837,6 +951,398 @@ async function runUserTurn(binding, { text, inputBlocks }) {
   } finally {
     clearActiveTurnController(binding.sessionKey, turnController);
   }
+}
+
+async function acceptAsyncSessionTurn(binding, body) {
+  const sessionKey = binding.sessionKey;
+  const runtime = ensureSessionRunRuntime(sessionKey);
+  const clientTurnId = normalizeOptionalString(body?.clientTurnId);
+  if (!clientTurnId) {
+    throw createApiError(400, 'internal_error', 'clientTurnId is required.', false);
+  }
+
+  const normalizedMode = normalizeOptionalString(body?.mode)?.toLowerCase() || 'text';
+  if (!['text', 'voice'].includes(normalizedMode)) {
+    throw createApiError(400, 'internal_error', 'mode must be text or voice.', false);
+  }
+
+  const inputBlocks = normalizeInputBlocks(body?.blocks);
+  const transcriptText = normalizeOptionalString(body?.transcript?.text);
+  const text = normalizeOptionalString(body?.text) || transcriptText || extractFirstInputText(inputBlocks) || '';
+  const fingerprint = hashSessionTurnPayload({
+    mode: normalizedMode,
+    text,
+    transcript: body?.transcript || null,
+    blocks: inputBlocks,
+    response: body?.response || null,
+    interrupt: body?.interrupt || null
+  });
+  const existingReceipt = runtime.receiptsByClientTurnId.get(clientTurnId);
+  if (existingReceipt) {
+    if (existingReceipt.fingerprint !== fingerprint) {
+      throw createApiError(409, 'duplicate_client_turn', `clientTurnId ${clientTurnId} has already been used for a different turn.`, false);
+    }
+    const existingRun = runtime.runsById.get(existingReceipt.runId);
+    return {
+      sessionKey,
+      clientTurnId,
+      userMessageId: existingReceipt.userMessageId,
+      runId: existingReceipt.runId,
+      status: existingRun?.state || 'queued'
+    };
+  }
+
+  const interruptPolicy = normalizeOptionalString(body?.interrupt?.policy);
+  const activeRun = runtime.activeRunId ? runtime.runsById.get(runtime.activeRunId) : null;
+  if (activeRun && !isTerminalRunState(activeRun.state)) {
+    if (interruptPolicy === 'abort_previous_if_running') {
+      await abortSessionRun(binding, activeRun.runId, { silentIfMissing: true });
+    } else {
+      throw createApiError(409, 'run_conflict', `Session ${sessionKey} already has an active run.`, true);
+    }
+  } else {
+    const activeTurn = activeTurnControllers.get(sessionKey);
+    if (activeTurn && interruptPolicy === 'abort_previous_if_running') {
+      await stopUserTurn(binding);
+    } else if (activeTurn) {
+      throw createApiError(409, 'run_conflict', `Session ${sessionKey} already has an active run.`, true);
+    }
+  }
+
+  const { reasoningText, userBlocks } = normalizeAsyncTurnInput({
+    mode: normalizedMode,
+    text,
+    transcriptText,
+    inputBlocks
+  });
+  validateAsyncTurnBlocks({ mode: normalizedMode, userBlocks });
+
+  const now = new Date().toISOString();
+  const runId = `run_${cryptoId()}`;
+  const userMessageId = cryptoId();
+  const userMessage = normalizeHistoryRow({
+    id: userMessageId,
+    agentId: binding.agentId,
+    sessionKey,
+    role: 'user',
+    createdAt: now,
+    blocks: userBlocks
+  });
+  appendHistory(binding.agentId, sessionKey, userMessage);
+  patchBinding(binding.agentId, {
+    replyState: 'running',
+    lastUserAt: userMessage.createdAt,
+    updatedAt: new Date().toISOString()
+  });
+
+  const run = {
+    runId,
+    sessionKey,
+    agentId: binding.agentId,
+    clientTurnId,
+    userMessageId,
+    mode: normalizedMode,
+    state: 'queued',
+    createdAt: now,
+    updatedAt: now,
+    reasoningText,
+    userBlocks,
+    sequence: 0,
+    text: '',
+    stream: body?.response?.stream !== false,
+    thinking: normalizeOptionalString(body?.response?.thinking) || null,
+    fingerprint
+  };
+
+  runtime.runsById.set(runId, run);
+  runtime.receiptsByClientTurnId.set(clientTurnId, { runId, userMessageId, fingerprint });
+  runtime.activeRunId = runId;
+
+  emitSessionEvent(sessionKey, 'run.accepted', {
+    sessionKey,
+    clientTurnId,
+    runId,
+    userMessageId
+  });
+
+  void executeAcceptedSessionRun(binding, runId);
+
+  return {
+    sessionKey,
+    clientTurnId,
+    userMessageId,
+    runId,
+    status: 'queued'
+  };
+}
+
+async function executeAcceptedSessionRun(binding, runId) {
+  const runtime = ensureSessionRunRuntime(binding.sessionKey);
+  const run = runtime.runsById.get(runId);
+  if (!run || isTerminalRunState(run.state)) return;
+
+  const latestBinding = getBinding(binding.agentId) || binding;
+  const turnSnapshot = {
+    upstreamSessionKey: latestBinding.upstreamSessionKey,
+    upstreamGeneration: latestBinding.upstreamGeneration || null
+  };
+  run.upstreamSessionKey = turnSnapshot.upstreamSessionKey;
+  run.turnSnapshot = turnSnapshot;
+  clearStoppedTurnState(binding.sessionKey, turnSnapshot.upstreamSessionKey);
+
+  const turnController = new AbortController();
+  setActiveTurnController(binding.sessionKey, {
+    agentId: binding.agentId,
+    runId,
+    upstreamSessionKey: turnSnapshot.upstreamSessionKey,
+    controller: turnController,
+    startedAt: Date.now()
+  });
+  updateSessionRunState(binding.sessionKey, runId, 'running');
+
+  try {
+    if (run.thinking) {
+      await gatewayCall('sessions.patch', {
+        key: turnSnapshot.upstreamSessionKey,
+        thinkingLevel: run.thinking
+      });
+    }
+    await ensureBootstrapInjected(latestBinding);
+
+    const startedAt = Date.now();
+    run.startedAt = startedAt;
+    const upstreamMessage = buildUpstreamMessage(run.userBlocks);
+
+    await gatewayCall('chat.send', {
+      sessionKey: turnSnapshot.upstreamSessionKey,
+      message: upstreamMessage,
+      deliver: false,
+      idempotencyKey: `openclaw-webchat-async-${runId}`
+    });
+
+    const assistantRaw = await waitForAssistantReplyWithEvents(turnSnapshot.upstreamSessionKey, {
+      minTimestampMs: startedAt,
+      expectedUserText: upstreamMessage,
+      timeoutMs: SESSION_RUN_TIMEOUT_MS,
+      signal: turnController.signal,
+      onDelta: ({ text, textDelta }) => {
+        appendSessionRunDelta(binding.sessionKey, runId, text, textDelta);
+      }
+    });
+
+    if (assistantRaw === ABORTED_ASSISTANT_REPLY || wasStoppedTurn(binding.sessionKey, turnSnapshot, startedAt)) {
+      if (!isTerminalRunState(getSessionRun(binding.sessionKey, runId)?.state)) {
+        updateSessionRunState(binding.sessionKey, runId, 'aborted');
+      }
+      patchBinding(binding.agentId, {
+        replyState: 'idle',
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
+
+    if (!assistantRaw) {
+      const timeoutError = createApiError(500, 'internal_error', 'Assistant response timed out.', true);
+      emitSessionRunError(binding.sessionKey, runId, timeoutError);
+      patchBinding(binding.agentId, {
+        replyState: 'idle',
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
+
+    const assistantBlocks = getPersistableAssistantBlocks(assistantRaw);
+    const assistantMessage = normalizeHistoryRow({
+      id: cryptoId(),
+      agentId: binding.agentId,
+      sessionKey: binding.sessionKey,
+      role: 'assistant',
+      createdAt: assistantRaw?.createdAt || assistantRaw?.timestamp || new Date().toISOString(),
+      blocks: assistantBlocks?.length
+        ? assistantBlocks
+        : [{ type: 'text', text: '（收到，但未拉取到可展示回复）' }]
+    });
+
+    appendHistory(binding.agentId, binding.sessionKey, assistantMessage);
+    runtime.runsById.get(runId).finalMessage = presentHistoryEntry(assistantMessage);
+    emitSessionEvent(binding.sessionKey, 'assistant.final', {
+      sessionKey: binding.sessionKey,
+      runId,
+      message: presentHistoryEntry(assistantMessage)
+    });
+    updateSessionRunState(binding.sessionKey, runId, 'final');
+    patchBinding(binding.agentId, {
+      replyState: 'idle',
+      lastAssistantAt: assistantMessage.createdAt,
+      lastSummary: buildMessageSummary(assistantMessage),
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    if (!isTerminalRunState(getSessionRun(binding.sessionKey, runId)?.state)) {
+      emitSessionRunError(binding.sessionKey, runId, error);
+    }
+    patchBinding(binding.agentId, {
+      replyState: 'idle',
+      updatedAt: new Date().toISOString()
+    });
+  } finally {
+    clearActiveTurnController(binding.sessionKey, turnController);
+    const latestRun = runtime.runsById.get(runId);
+    if (runtime.activeRunId === runId && latestRun && isTerminalRunState(latestRun.state)) {
+      runtime.activeRunId = null;
+    }
+  }
+}
+
+async function waitForAssistantReplyWithEvents(sessionKey, { minTimestampMs, expectedUserText, timeoutMs, signal, onDelta } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  const expected = canonicalizeText(expectedUserText);
+  let lastText = '';
+
+  while (Date.now() < deadline) {
+    if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
+    const history = await gatewayCall('chat.history', { sessionKey, limit: 120 });
+    if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
+    const messages = Array.isArray(history?.messages) ? history.messages : [];
+    const userIndex = findMatchingUserMessageIndex(messages, expected, minTimestampMs);
+    if (userIndex >= 0) {
+      const streamingAssistant = findLatestStreamingAssistantMessageAfterUser(messages, userIndex, minTimestampMs);
+      const nextText = normalizeOptionalString(extractTextFromGatewayMessage(streamingAssistant)) || '';
+      if (nextText && nextText !== lastText) {
+        const textDelta = nextText.startsWith(lastText) ? nextText.slice(lastText.length) : nextText;
+        lastText = nextText;
+        if (textDelta && typeof onDelta === 'function') onDelta({ textDelta, text: nextText });
+      }
+
+      const latestAssistant = findLatestPersistableAssistantMessageAfterUser(messages, userIndex, minTimestampMs);
+      if (latestAssistant) {
+        const finalText = normalizeOptionalString(extractTextFromGatewayMessage(latestAssistant)) || '';
+        if (finalText && finalText !== lastText && typeof onDelta === 'function') {
+          const textDelta = finalText.startsWith(lastText) ? finalText.slice(lastText.length) : finalText;
+          lastText = finalText;
+          if (textDelta) onDelta({ textDelta, text: finalText });
+        }
+        return latestAssistant;
+      }
+    }
+
+    if (signal?.aborted) return ABORTED_ASSISTANT_REPLY;
+    await sleep(800);
+  }
+
+  return null;
+}
+
+function appendSessionRunDelta(sessionKey, runId, text, textDelta) {
+  const run = getSessionRun(sessionKey, runId);
+  if (!run || isTerminalRunState(run.state)) return;
+  run.sequence = Number(run.sequence || 0) + 1;
+  run.text = text;
+  run.updatedAt = new Date().toISOString();
+  emitSessionEvent(sessionKey, 'assistant.delta', {
+    sessionKey,
+    runId,
+    sequence: run.sequence,
+    textDelta,
+    text
+  });
+}
+
+function emitSessionRunError(sessionKey, runId, error) {
+  const apiError = normalizeApiError(error);
+  const run = getSessionRun(sessionKey, runId);
+  if (run) {
+    run.error = {
+      code: apiError.code,
+      message: apiError.message,
+      retryable: apiError.retryable
+    };
+  }
+  emitSessionEvent(sessionKey, 'assistant.error', {
+    sessionKey,
+    runId,
+    error: {
+      code: apiError.code,
+      message: apiError.message,
+      retryable: apiError.retryable
+    }
+  });
+  updateSessionRunState(sessionKey, runId, 'error');
+}
+
+function normalizeAsyncTurnInput({ mode, text, transcriptText, inputBlocks }) {
+  const normalizedInputBlocks = normalizeInputBlocks(inputBlocks);
+  const canonicalText = normalizeOptionalString(text) || normalizeOptionalString(transcriptText) || extractFirstInputText(normalizedInputBlocks) || '';
+  const mediaBlocks = normalizedInputBlocks.filter((block) => block.type !== 'text');
+  const extraTextBlocks = normalizedInputBlocks.filter((block) => block.type === 'text' && canonicalizeText(block.text) !== canonicalizeText(canonicalText));
+  const userBlocks = [];
+  if (canonicalText) {
+    userBlocks.push({ type: 'text', text: canonicalText });
+  }
+  userBlocks.push(...extraTextBlocks, ...mediaBlocks);
+
+  if (mode === 'voice') {
+    return {
+      reasoningText: canonicalText,
+      userBlocks
+    };
+  }
+
+  if (!userBlocks.length && canonicalText) {
+    userBlocks.push({ type: 'text', text: canonicalText });
+  }
+  return {
+    reasoningText: canonicalText,
+    userBlocks
+  };
+}
+
+function validateAsyncTurnBlocks({ mode, userBlocks }) {
+  if (!Array.isArray(userBlocks) || !userBlocks.length) {
+    throw createApiError(400, 'internal_error', 'Turn is empty.', false);
+  }
+
+  if (mode !== 'voice') return;
+
+  const hasTextBlock = userBlocks.some((block) => block.type === 'text' && normalizeOptionalString(block.text));
+  const audioBlocks = userBlocks.filter((block) => block.type === 'audio');
+  if (!hasTextBlock || !audioBlocks.length) {
+    throw createApiError(400, 'internal_error', 'Voice turns must contain both transcript text and audio blocks.', false);
+  }
+
+  for (const block of audioBlocks) {
+    if (!isSupportedUploadMime('audio', block.mimeType) && !isUploadFilenameKind('audio', block.name || block.source || '')) {
+      throw createApiError(400, 'unsupported_audio_mime', `Unsupported audio mime type: ${block.mimeType || 'unknown'}.`, false);
+    }
+    const uploadPath = resolveManagedUploadPath(block.source);
+    if (!uploadPath || !fs.existsSync(uploadPath)) {
+      throw createApiError(400, 'invalid_upload_source', `Upload source ${block.source || '(missing)'} was not found for this user.`, false);
+    }
+  }
+}
+
+function extractFirstInputText(blocks) {
+  return (blocks || []).find((block) => block.type === 'text' && normalizeOptionalString(block.text))?.text || '';
+}
+
+function hashSessionTurnPayload(payload) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload || {}))
+    .digest('hex');
+}
+
+function findLatestStreamingAssistantMessageAfterUser(messages, userIndex, minTimestampMs) {
+  let candidate = null;
+  for (let index = userIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (String(message?.role || '').toLowerCase() !== 'assistant') continue;
+    if (getMessageTimestampMs(message) < minTimestampMs) continue;
+    const text = normalizeOptionalString(extractTextFromGatewayMessage(message));
+    if (!text) continue;
+    candidate = message;
+  }
+  return candidate;
 }
 
 async function runSlashCommand(binding, command) {
@@ -1705,6 +2211,15 @@ function buildUpstreamMessage(blocks) {
 
 async function stopUserTurn(binding) {
   const latestBinding = getBinding(binding.agentId) || binding;
+  const runtime = ensureSessionRunRuntime(binding.sessionKey);
+  if (runtime.activeRunId) {
+    const activeRun = await abortSessionRun(binding, runtime.activeRunId, { silentIfMissing: true });
+    return {
+      aborted: Boolean(activeRun),
+      runIds: activeRun ? [activeRun.runId] : []
+    };
+  }
+
   const activeTurn = activeTurnControllers.get(binding.sessionKey);
   const upstreamSessionKey = latestBinding.upstreamSessionKey;
 
@@ -1724,6 +2239,38 @@ async function stopUserTurn(binding) {
     aborted: Boolean(response?.aborted || activeTurn),
     runIds: Array.isArray(response?.runIds) ? response.runIds : []
   };
+}
+
+async function abortSessionRun(binding, runId, { silentIfMissing = false } = {}) {
+  const runtime = ensureSessionRunRuntime(binding.sessionKey);
+  const run = runtime.runsById.get(String(runId || ''));
+  if (!run) {
+    if (silentIfMissing) return null;
+    throw createApiError(404, 'run_not_found', 'Run not found.', false);
+  }
+  if (isTerminalRunState(run.state)) return run;
+
+  const latestBinding = getBinding(binding.agentId) || binding;
+  const upstreamSessionKey = run.upstreamSessionKey || latestBinding.upstreamSessionKey;
+  const activeTurn = activeTurnControllers.get(binding.sessionKey);
+
+  if (activeTurn?.runId === run.runId || activeTurn?.upstreamSessionKey === upstreamSessionKey) {
+    activeTurn.controller.abort();
+  }
+
+  markStoppedTurn(binding.sessionKey, upstreamSessionKey);
+  try {
+    await gatewayCall('chat.abort', { sessionKey: upstreamSessionKey });
+  } catch {
+    // Ignore abort transport errors; the run is already being marked terminal locally.
+  }
+
+  updateSessionRunState(binding.sessionKey, run.runId, 'aborted');
+  patchBinding(binding.agentId, {
+    replyState: 'idle',
+    updatedAt: new Date().toISOString()
+  });
+  return runtime.runsById.get(run.runId) || run;
 }
 
 function setActiveTurnController(sessionKey, entry) {
@@ -1877,7 +2424,10 @@ function normalizeMediaLikeItem(item) {
   return {
     type,
     source: cleanMediaValue(source),
-    name: normalizeOptionalString(item?.name || item?.filename || item?.fileName) || undefined
+    name: normalizeOptionalString(item?.name || item?.filename || item?.fileName) || undefined,
+    mimeType: normalizeOptionalString(item?.mimeType || item?.contentType) || undefined,
+    sizeBytes: Number.isFinite(Number(item?.sizeBytes || item?.size)) ? Number(item?.sizeBytes || item?.size) : undefined,
+    durationMs: Number.isFinite(Number(item?.durationMs)) ? Number(item?.durationMs) : undefined
   };
 }
 
@@ -1904,7 +2454,8 @@ function normalizeInputBlocks(value) {
       transcriptStatus: normalizeOptionalString(item.transcriptStatus) || undefined,
       transcriptText: normalizeOptionalString(item.transcriptText || item.transcript) || undefined,
       transcriptError: normalizeOptionalString(item.transcriptError) || undefined,
-      sizeBytes: Number.isFinite(Number(item.sizeBytes || item.size)) ? Number(item.sizeBytes || item.size) : undefined
+      sizeBytes: Number.isFinite(Number(item.sizeBytes || item.size)) ? Number(item.sizeBytes || item.size) : undefined,
+      durationMs: Number.isFinite(Number(item.durationMs)) ? Number(item.durationMs) : undefined
     });
   }
 
@@ -2089,11 +2640,7 @@ function shouldBroadcastHistoryUpdate(row) {
 }
 
 function sendEventStreamEvent(res, event, payload = {}) {
-  const body = JSON.stringify({
-    ...payload,
-    emittedAt: new Date().toISOString()
-  });
-  return writeEventStreamChunk(res, `event: ${event}\ndata: ${body}\n\n`);
+  return sendEventStreamEnvelope(res, { event, payload });
 }
 
 function broadcastEventStream(event, payload = {}) {
@@ -2117,6 +2664,162 @@ function closeEventStreamClient(clientId) {
   if (!client) return;
   clearInterval(client.keepalive);
   eventStreamClients.delete(clientId);
+}
+
+function sendEventStreamEnvelope(res, { id = null, event, payload = {} }) {
+  const body = JSON.stringify({
+    ...payload,
+    emittedAt: new Date().toISOString()
+  });
+  const prefix = id === null || id === undefined ? '' : `id: ${id}\n`;
+  return writeEventStreamChunk(res, `${prefix}event: ${event}\ndata: ${body}\n\n`);
+}
+
+function ensureSessionRunRuntime(sessionKey) {
+  const normalizedSessionKey = normalizeBindingSessionKey(sessionKey);
+  let runtime = sessionRunStates.get(normalizedSessionKey);
+  if (runtime) return runtime;
+
+  runtime = {
+    runsById: new Map(),
+    receiptsByClientTurnId: new Map(),
+    activeRunId: null
+  };
+  sessionRunStates.set(normalizedSessionKey, runtime);
+  return runtime;
+}
+
+function getSessionRun(sessionKey, runId) {
+  return ensureSessionRunRuntime(sessionKey).runsById.get(String(runId || '')) || null;
+}
+
+function isTerminalRunState(state) {
+  return ['final', 'error', 'aborted'].includes(String(state || '').toLowerCase());
+}
+
+function updateSessionRunState(sessionKey, runId, state) {
+  const runtime = ensureSessionRunRuntime(sessionKey);
+  const run = runtime.runsById.get(runId);
+  if (!run) return null;
+  if (run.state === state) return run;
+  run.state = state;
+  run.updatedAt = new Date().toISOString();
+  if (isTerminalRunState(state) && runtime.activeRunId === runId) {
+    runtime.activeRunId = null;
+  }
+  emitSessionEvent(sessionKey, 'run.state', {
+    sessionKey,
+    runId,
+    state
+  });
+  return run;
+}
+
+function emitSessionEvent(sessionKey, event, payload = {}) {
+  const normalizedSessionKey = normalizeBindingSessionKey(sessionKey);
+  const nextSequence = (sessionEventSequences.get(normalizedSessionKey) || 0) + 1;
+  sessionEventSequences.set(normalizedSessionKey, nextSequence);
+
+  const entry = {
+    id: String(nextSequence),
+    event,
+    payload: {
+      sessionKey: normalizedSessionKey,
+      ...payload
+    }
+  };
+
+  if (!sessionEventBacklogs.has(normalizedSessionKey)) {
+    sessionEventBacklogs.set(normalizedSessionKey, []);
+  }
+  const backlog = sessionEventBacklogs.get(normalizedSessionKey);
+  backlog.push(entry);
+  if (backlog.length > SESSION_EVENT_BACKLOG_LIMIT) {
+    backlog.splice(0, backlog.length - SESSION_EVENT_BACKLOG_LIMIT);
+  }
+
+  const clients = sessionEventClients.get(normalizedSessionKey);
+  if (!clients) return entry;
+  for (const [clientId, client] of clients.entries()) {
+    const ok = sendEventStreamEnvelope(client.res, entry);
+    if (!ok) closeSessionEventClient(normalizedSessionKey, clientId);
+  }
+  return entry;
+}
+
+function coerceSessionEventCursor(value) {
+  const raw = normalizeOptionalString(value);
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return numeric;
+}
+
+function replaySessionEventBacklog(res, sessionKey, cursor) {
+  const normalizedSessionKey = normalizeBindingSessionKey(sessionKey);
+  const backlog = sessionEventBacklogs.get(normalizedSessionKey) || [];
+  for (const entry of backlog) {
+    if (Number(entry.id) <= cursor) continue;
+    if (!sendEventStreamEnvelope(res, entry)) break;
+  }
+}
+
+function sendActiveSessionRunSnapshot(res, sessionKey, runId) {
+  const run = getSessionRun(sessionKey, runId);
+  if (!run || isTerminalRunState(run.state)) return;
+  sendEventStreamEvent(res, 'run.state', {
+    sessionKey,
+    runId,
+    state: run.state
+  });
+  if (run.sequence > 0 && run.text) {
+    sendEventStreamEvent(res, 'assistant.delta', {
+      sessionKey,
+      runId,
+      sequence: run.sequence,
+      textDelta: run.text,
+      text: run.text
+    });
+  }
+}
+
+function closeSessionEventClient(sessionKey, clientId) {
+  const normalizedSessionKey = normalizeBindingSessionKey(sessionKey);
+  const clients = sessionEventClients.get(normalizedSessionKey);
+  if (!clients) return;
+  const client = clients.get(clientId);
+  if (!client) return;
+  clearInterval(client.keepalive);
+  clients.delete(clientId);
+  if (!clients.size) sessionEventClients.delete(normalizedSessionKey);
+}
+
+function createApiError(status, code, message, retryable = false) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  error.retryable = retryable;
+  return error;
+}
+
+function normalizeApiError(error) {
+  return {
+    status: Number(error?.status) || 500,
+    code: normalizeOptionalString(error?.code) || 'internal_error',
+    message: normalizeOptionalString(error?.message) || 'Internal error.',
+    retryable: Boolean(error?.retryable)
+  };
+}
+
+function sendApiError(res, status, code, message, retryable = false) {
+  return res.status(status).json({
+    ok: false,
+    error: {
+      code,
+      message,
+      retryable
+    }
+  });
 }
 
 function getHistoryPage({ agentId, limit, before }) {
@@ -2432,6 +3135,7 @@ function presentBlock(block) {
       name: block.name || null,
       mimeType: block.mimeType || null,
       sizeBytes: block.sizeBytes || null,
+      durationMs: block.durationMs || null,
       transcriptStatus: block.transcriptStatus || null,
       transcriptText: block.transcriptText || null,
       transcriptError: block.transcriptError || null
@@ -2446,6 +3150,7 @@ function presentBlock(block) {
         invalid: true,
         invalidReason: '文件不可访问',
         name: block.name || path.basename(localPath),
+        durationMs: block.durationMs || null,
         transcriptStatus: block.transcriptStatus || null,
         transcriptText: block.transcriptText || null,
         transcriptError: block.transcriptError || null
@@ -2458,6 +3163,7 @@ function presentBlock(block) {
         invalid: true,
         invalidReason: '文件丢失',
         name: block.name || path.basename(localPath),
+        durationMs: block.durationMs || null,
         transcriptStatus: block.transcriptStatus || null,
         transcriptText: block.transcriptText || null,
         transcriptError: block.transcriptError || null
@@ -2471,6 +3177,7 @@ function presentBlock(block) {
       name: block.name || path.basename(localPath),
       mimeType: block.mimeType || null,
       sizeBytes: block.sizeBytes || null,
+      durationMs: block.durationMs || null,
       transcriptStatus: block.transcriptStatus || null,
       transcriptText: block.transcriptText || null,
       transcriptError: block.transcriptError || null
@@ -2482,6 +3189,7 @@ function presentBlock(block) {
     invalid: true,
     invalidReason: '不支持的媒体地址',
     name: block.name || null,
+    durationMs: block.durationMs || null,
     transcriptStatus: block.transcriptStatus || null,
     transcriptText: block.transcriptText || null,
     transcriptError: block.transcriptError || null
@@ -2709,7 +3417,8 @@ function normalizeBlock(block) {
     transcriptStatus: normalizeOptionalString(block.transcriptStatus) || undefined,
     transcriptText: normalizeOptionalString(block.transcriptText || block.transcript) || undefined,
     transcriptError: normalizeOptionalString(block.transcriptError) || undefined,
-    sizeBytes: Number.isFinite(Number(block.sizeBytes || block.size)) ? Number(block.sizeBytes || block.size) : undefined
+    sizeBytes: Number.isFinite(Number(block.sizeBytes || block.size)) ? Number(block.sizeBytes || block.size) : undefined,
+    durationMs: Number.isFinite(Number(block.durationMs)) ? Number(block.durationMs) : undefined
   };
 }
 

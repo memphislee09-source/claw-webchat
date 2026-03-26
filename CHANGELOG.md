@@ -6,6 +6,12 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+### Added
+- Add a session-scoped voice/chat run API for Android integration without introducing a second source of truth: `GET /api/openclaw-webchat/sessions/{sessionKey}/events` now streams `ready`, `run.accepted`, `run.state`, `assistant.delta`, `assistant.final`, and `assistant.error`, while `POST /sessions/{sessionKey}/turns` accepts asynchronous text/voice turns and `POST /sessions/{sessionKey}/runs/{runId}/abort` stops an active run idempotently
+
+### Changed
+- Preserve audio `durationMs` through uploads, local history persistence, and presented message blocks so voice-originated user turns retain both transcript text and raw audio metadata in normal chat history
+
 ## [0.1.7] - 2026-03-26
 
 ### Fixed
