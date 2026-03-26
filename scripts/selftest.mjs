@@ -131,7 +131,7 @@ async function checkPageShell() {
   assert(appJs.includes('async function handleConversationNavigationKey(event)'), 'app.js should include keyboard navigation handling for the conversation pane');
   assert(appJs.includes("conversationRefreshNoticeEl.textContent = state.pendingConversationRefreshSyncing"), 'app.js should render a dedicated pending-refresh notice for history readers');
   assert(appJs.includes("const settingsVersionValueEl = document.getElementById('settingsVersionValue');"), 'app.js should bind the About settings version element');
-  assert(appJs.includes("settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.5';"), 'app.js should render the current project version in About settings');
+  assert(appJs.includes("settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.7';"), 'app.js should render the current project version in About settings');
   assert(css.includes('.agent-card'), 'styles.css should include agent-card styles');
   assert(css.includes('.agent-bottom-row'), 'styles.css should include enhanced agent list layout');
   assert(css.includes('.command-menu'), 'styles.css should include slash command menu styles');
@@ -183,9 +183,19 @@ async function checkBootstrapContract() {
   assert(serverJs.includes("app.get('/api/openclaw-webchat/events', (req, res) => {"), 'server should expose an SSE events endpoint for event-driven refresh');
   assert(serverJs.includes("broadcastEventStream('agent-update'"), 'server should broadcast agent updates onto the SSE stream');
   assert(serverJs.includes("broadcastEventStream('conversation-update'"), 'server should broadcast conversation updates onto the SSE stream');
+  assert(serverJs.includes('const HISTORY_RECONCILE_FETCH_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_LIMIT || 200);'), 'server should define an open-time upstream history reconciliation fetch limit');
+  assert(serverJs.includes('const HISTORY_RECONCILE_USER_MATCH_WINDOW_MS = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_USER_MATCH_WINDOW_MS || 2 * 60 * 1000);'), 'server should bound upstream/local user-turn matching with a narrow reconciliation window');
   assert(serverJs.includes('const MODEL_CATALOG_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_MODEL_CATALOG_CACHE_TTL_MS || 30000);'), 'server should cache gateway model catalogs briefly');
   assert(serverJs.includes('const SESSION_STATE_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_STATE_CACHE_TTL_MS || 2500);'), 'server should cache gateway session state briefly');
   assert(serverJs.includes('function summarizeModelCatalog(models) {'), 'server should summarize the model catalog by provider for slash output');
+  assert(serverJs.includes('await reconcileBindingHistory(hydrated, { limit: HISTORY_RECONCILE_FETCH_LIMIT });'), 'server should reconcile upstream session history when opening an agent');
+  assert(serverJs.includes('function findLatestPersistableAssistantMessageAfterUser(messages, userIndex, minTimestampMs) {'), 'server should look for the latest persistable assistant instead of blindly taking the latest raw assistant event');
+  assert(serverJs.includes('if (gatewayMessageHasToolCalls(message)) return null;'), 'server should keep tool-phase assistant messages from being persisted as final replies');
+  assert(serverJs.includes('const candidates = extractReconcileAssistantRows(latestBinding, messages, localRows, sessionStartMs);'), 'open-time reconciliation should only extract assistant backfill candidates');
+  assert(serverJs.includes('if (pendingAssistantRow && activeUserMatchedLocalHistory) rows.push(pendingAssistantRow);'), 'assistant backfill should only occur for turns whose user message already exists locally');
+  assert(serverJs.includes('function hasEquivalentUserHistoryRow(rows, candidate) {'), 'server should explicitly compare upstream user turns to local user history before backfilling assistants');
+  assert(serverJs.includes('if (toIsoString(row.createdAt) !== candidateCreatedAt) return false;'), 'assistant dedupe should require exact timestamps so repeated short replies are not collapsed');
+  assert(serverJs.includes('const assistantBlocks = getPersistableAssistantBlocks(assistantRaw);'), 'server should reuse persistable assistant filtering in both sync and late reconciliation paths');
   assert(appJs.includes("const source = new window.EventSource('/api/openclaw-webchat/events');"), 'app should connect to the SSE events endpoint');
   assert(appJs.includes("source.addEventListener('agent-update', handleServerEvent);"), 'app should subscribe to agent-update SSE events');
   assert(appJs.includes("source.addEventListener('conversation-update', handleServerEvent);"), 'app should subscribe to conversation-update SSE events');

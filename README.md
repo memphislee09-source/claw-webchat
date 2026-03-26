@@ -6,8 +6,8 @@ Language / 语言: [简体中文](#zh-cn) | [English](#en)
 
 - Download the repository copy: [claw-webchat-promo-v4.mp4](docs/media/claw-webchat-promo-v4.mp4)
 - Latest release: [github.com/memphislee09-source/claw-webchat/releases/latest](https://github.com/memphislee09-source/claw-webchat/releases/latest)
-- Current bundle: [claw-webchat-v0.1.6-bundle.tar.gz](https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.tar.gz)
-- Current checksum: [claw-webchat-v0.1.6-bundle.sha256](https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.sha256)
+- Latest published bundle: [claw-webchat-v0.1.6-bundle.tar.gz](https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.tar.gz)
+- Latest published checksum: [claw-webchat-v0.1.6-bundle.sha256](https://github.com/memphislee09-source/claw-webchat/releases/download/v0.1.6/claw-webchat-v0.1.6-bundle.sha256)
 
 <a id="zh-cn"></a>
 ## 简体中文
@@ -18,7 +18,7 @@ Language / 语言: [简体中文](#zh-cn) | [English](#en)
 `Claw WebChat` 是一个独立于 OpenClaw 默认 WebUI 的 WebChat 项目，面向长期使用的 agent 对话场景。它强调长期历史保留、富媒体体验、多 agent 隔离，以及更直接的模型与 Think 切换体验。
 
 ### 项目状态
-- 当前版本：`0.1.6`
+- 当前版本：`0.1.7`
 - 默认开发分支：`main`
 - 当前稳定性：`alpha`
 - 推荐部署方式：本机或带访问控制的私有网络
@@ -181,7 +181,7 @@ npm run bundle
 `Claw WebChat` is a standalone WebChat for long-lived OpenClaw agent workflows. It focuses on durable local history, rich media support, multi-agent isolation, and more direct model / Think switching than the default OpenClaw Web UI.
 
 ### Project Status
-- Current version: `0.1.6`
+- Current version: `0.1.7`
 - Default branch: `main`
 - Stability: `alpha`
 - Recommended deployment: local machine or private network with access control

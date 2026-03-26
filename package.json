@@ -1,7 +1,7 @@
 {
   "name": "claw-webchat",
   "description": "Standalone WebChat for OpenClaw with long-lived history and media support",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "scripts": {

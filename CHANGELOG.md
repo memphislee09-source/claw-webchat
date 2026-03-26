@@ -6,19 +6,22 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-03-26
+
 ### Fixed
+- Stop persisting progress/tool-phase assistant updates as if they were the final reply for the current turn; the reply matcher now waits for the current upstream user row and only accepts the latest assistant after that row when it has persistable display blocks and no `toolCall` markers
+- Add open-time upstream history reconciliation so replies that exist in the current upstream session but are missing from local JSONL are backfilled the next time that conversation is opened
+- Reuse the same persistable-assistant filter in late-reply reconciliation, closing the earlier split where the synchronous path and late-reply path could disagree about what counts as the final assistant message
 - Remove the duplicate idle-state helper copy from the `/model` picker modal so the introductory explanation is shown only once while no loading, success, or error message is active
-- Stop waiting for `thinking-options` during agent switches, so opening another conversation no longer blocks on refreshing the composer-side thinking indicator first
 - Preserve the reader's visible place when the current conversation re-renders, instead of letting background refresh jump the viewport into older history while the user is reading mid-timeline
 - Clarify the hidden media bootstrap so agents treat generated local `.mp3` / `.wav` files as normal Claw WebChat media attachments via `MEDIA:` / `mediaUrl:` fallback, instead of claiming WebChat cannot receive the file
 
 ### Changed
-- Tighten the public agent-install docs so the release-bundle and network-install paths both use explicit step-by-step checks, lower-capability-agent fallback guidance, and a final completion gate; the network guide now also covers official OpenClaw bootstrap before fetching WebChat over the network
-- Simplify the composer-side thinking control back to a static `T` button and move the current session status into the chat header, where the active model and full thinking level name are shown beside the agent title
-- Rework the conversation pane scroll model so bottom-following, history-reading, background-refresh notice handling, and `Home` / `End` / `PageUp` / `PageDown` keyboard navigation all use the same rules
-- Refresh the hidden bootstrap version again so existing agent sessions re-ingest the stricter local-audio fallback guidance on their next open/send path
 - Add an SSE-based event stream for agent/session updates so the UI now refreshes primarily on real server-side changes, while the old fixed 10-second polling loop is reduced to a low-frequency safety net
 - Rework the conversation viewport logic around a unified snapshot/restore controller so preserve-position is now the default for rerenders, media resizes, history prepends, and current-session refreshes, while follow-bottom remains an explicit mode
+- Simplify the composer-side thinking control back to a static `T` button and move the current session status into the chat header, where the active model and full thinking level name are shown beside the agent title
+- Refresh the hidden bootstrap version again so existing agent sessions re-ingest the stricter local-audio fallback guidance on their next open/send path
+- Tighten the public agent-install docs so the release-bundle and network-install paths both use explicit step-by-step checks, lower-capability-agent fallback guidance, and a final completion gate; the network guide now also covers official OpenClaw bootstrap before fetching WebChat over the network
 
 ## [0.1.6] - 2026-03-24
 

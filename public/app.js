@@ -626,7 +626,7 @@ const state = {
   },
   projectInfo: {
     name: BRAND_NAME,
-    version: '0.1.5',
+    version: '0.1.7',
     summary: '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: 'https://github.com/memphislee09-source/claw-webchat'
   },
@@ -1250,7 +1250,7 @@ function normalizeServiceSettings(payload) {
 function normalizeProjectInfo(payload) {
   return {
     name: BRAND_NAME,
-    version: payload?.version || '0.1.5',
+    version: payload?.version || '0.1.7',
     summary: payload?.summary || '一个面向个人使用的 Claw WebChat，强调本地优先、长历史、媒体上传和更顺手的 agent 交流体验。',
     githubUrl: payload?.githubUrl || 'https://github.com/memphislee09-source/claw-webchat'
   };
@@ -4587,7 +4587,7 @@ function renderProjectInfo() {
     settingsAboutSummaryEl.textContent = t('text.projectSummary');
   }
   if (settingsVersionValueEl) {
-    settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.5';
+    settingsVersionValueEl.textContent = state.projectInfo.version || '0.1.7';
   }
   if (settingsGithubLinkEl) {
     settingsGithubLinkEl.href = state.projectInfo.githubUrl;
