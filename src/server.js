@@ -2394,8 +2394,8 @@ function findMatchingUserMessageIndex(messages, expectedUserText, minTimestampMs
     const message = messages[index];
     if (String(message?.role || '').toLowerCase() !== 'user') continue;
     if (getMessageTimestampMs(message) < minTimestampMs) continue;
-    const actual = canonicalizeText(extractTextFromGatewayMessage(message));
-    if (actual && actual === expectedUserText) return index;
+    const actual = extractTextFromGatewayMessage(message);
+    if (gatewayUserTextMatchesExpected(actual, expectedUserText)) return index;
   }
   return -1;
 }
@@ -2719,13 +2719,13 @@ function hasEquivalentHistoryRow(rows, candidate) {
 
 function hasEquivalentUserHistoryRow(rows, candidate) {
   const candidateTs = Date.parse(candidate?.createdAt || '') || 0;
-  const candidateBlocks = JSON.stringify(Array.isArray(candidate?.blocks) ? candidate.blocks : []);
+  const candidateBlocks = Array.isArray(candidate?.blocks) ? candidate.blocks : [];
 
   return (rows || []).some((row) => {
     if (!row || row.role !== 'user') return false;
     const rowTs = Date.parse(row.createdAt || '') || 0;
     if (Math.abs(rowTs - candidateTs) > HISTORY_RECONCILE_USER_MATCH_WINDOW_MS) return false;
-    return JSON.stringify(Array.isArray(row.blocks) ? row.blocks : []) === candidateBlocks;
+    return userHistoryBlocksMatch(candidateBlocks, Array.isArray(row.blocks) ? row.blocks : []);
   });
 }
 
@@ -3478,6 +3478,47 @@ function normalizeEpochToMs(value) {
 
 function canonicalizeText(value) {
   return String(value || '').replace(/\r\n/g, '\n').trim();
+}
+
+function gatewayUserTextMatchesExpected(actualUserText, expectedUserText) {
+  const actual = canonicalizeText(actualUserText);
+  const expected = canonicalizeText(expectedUserText);
+  if (!actual || !expected) return false;
+  if (actual === expected) return true;
+  if (!actual.endsWith(expected)) return false;
+
+  const prefix = canonicalizeText(actual.slice(0, Math.max(0, actual.length - expected.length)));
+  return isRecognizedGatewayUserPrefix(prefix);
+}
+
+function isRecognizedGatewayUserPrefix(prefixText) {
+  const prefix = canonicalizeText(prefixText);
+  if (!prefix) return false;
+  return /^system:/i.test(prefix) || /\bexec completed\b/i.test(prefix);
+}
+
+function userHistoryBlocksMatch(upstreamBlocks, localBlocks) {
+  const normalizedUpstream = Array.isArray(upstreamBlocks) ? upstreamBlocks.map((block) => normalizeBlock(block)).filter(Boolean) : [];
+  const normalizedLocal = Array.isArray(localBlocks) ? localBlocks.map((block) => normalizeBlock(block)).filter(Boolean) : [];
+
+  if (JSON.stringify(normalizedUpstream) === JSON.stringify(normalizedLocal)) return true;
+  if (normalizedUpstream.length !== normalizedLocal.length) return false;
+
+  for (let index = 0; index < normalizedUpstream.length; index += 1) {
+    const upstreamBlock = normalizedUpstream[index];
+    const localBlock = normalizedLocal[index];
+    if (!upstreamBlock || !localBlock) return false;
+    if (upstreamBlock.type !== localBlock.type) return false;
+
+    if (upstreamBlock.type === 'text') {
+      if (!gatewayUserTextMatchesExpected(upstreamBlock.text, localBlock.text)) return false;
+      continue;
+    }
+
+    if (JSON.stringify(upstreamBlock) !== JSON.stringify(localBlock)) return false;
+  }
+
+  return true;
 }
 
 function isNoReplyOnly(blocks) {

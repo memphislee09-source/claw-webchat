@@ -82,6 +82,7 @@ curl http://127.0.0.1:3770/healthz
 - 富媒体解析，兼容结构化 block 与 `MEDIA:` / `mediaUrl:` fallback
 - 统一附件投递链路：本地稳定保存 `openclaw-upload:*`，发送给 agent 前再物化成可读取源
 - 联系人切换 / 会话打开优先秒开本地历史；缺失消息回补改为后台 reconcile + SSE 刷新，不再阻塞进入对话
+- 对上游 `role:user` 文本前置 `System:` / `Exec completed` 噪声的场景保持稳健匹配，避免 agent 明明已完成、WebChat 却长时间显示处理中
 - 当前 agent 历史搜索，支持跳转和高亮
 - `/model` / `/models` 模型选择器，完整 provider 分组、暖启动更快
 - `T:*` Think 快捷切换，按模型感知可用等级

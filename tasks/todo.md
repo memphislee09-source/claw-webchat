@@ -1,6 +1,9 @@
 # Task Todo
 
 ## Current Task
+- [x] Implement a bounded upstream user-turn matcher that tolerates prepended system-prefix noise without relaxing matching into broad fuzzy search
+- [x] Reuse the same tolerant matcher in sync wait, late-reply reconciliation, and open-time history reconciliation so missed final replies can be backfilled consistently
+- [x] Add regression coverage for a polluted upstream user row and verify the known `yuyan-mini` turn can now reconcile locally
 - [x] Refactor `POST /api/openclaw-webchat/agents/:agentId/open` so it returns local history immediately instead of synchronously waiting on upstream history reconciliation
 - [x] Keep open-time upstream reconciliation as a background repair path with per-agent dedupe / short TTL so rapid contact switching does not spam slow `chat.history` calls
 - [x] Make background reconciliation-triggered `conversation-update` events refresh the active conversation safely without regressing reading-position behavior
@@ -76,6 +79,14 @@
 - [x] Verify merged `main`, update baseline notes, and push the new mainline commit to GitHub
 
 ## Current Review
+- `yuyan-mini` stuck-processing root cause is now fixed in the server-side user-turn matcher: upstream `role:user` rows that prepend recognized system noise (currently `System:` / `Exec completed`) but still end with the original WebChat user payload are treated as the same logical turn instead of being dropped as a mismatch.
+- The bounded matcher is now reused in both synchronous assistant waiting and open-time user-history reconciliation, which keeps the fix consistent across the immediate send path, late-reply recovery, and later session reopen/backfill flows.
+- Verification for this follow-up passed with:
+  - `npm run check`
+  - `launchctl kickstart -k gui/$(id -u)/ai.openclaw.webchat`
+  - `curl -sf http://127.0.0.1:3770/healthz`
+  - `npm run selftest`
+  - a live `yuyan-mini` reopen/reconcile check that backfilled the previously missing `2026-03-27T08:39:46.562Z` assistant reply plus image `20260327_163946_689f81.png` into local WebChat history
 - Contact-switch latency follow-up now removes the slow upstream `chat.history` reconcile from the synchronous `POST /api/openclaw-webchat/agents/:agentId/open` path.
 - `open` still returns the same local first-page history payload, but it now schedules `scheduleBindingHistoryReconciliation(...)` on the background side after responding, so users can enter a conversation without waiting on the slow gateway round-trip.
 - Background open-time reconciliation now has per-agent in-flight dedupe plus a short cooldown (`OPENCLAW_WEBCHAT_HISTORY_RECONCILE_COOLDOWN_MS`, default `15000`) to avoid repeated `chat.history` calls when users switch between contacts quickly.

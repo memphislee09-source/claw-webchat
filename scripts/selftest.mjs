@@ -207,6 +207,11 @@ async function checkBootstrapContract() {
   assert(serverJs.includes("void scheduleBindingHistoryReconciliation(hydrated, { reason: 'open' });"), 'server should schedule open-time history reconciliation in the background');
   assert(serverJs.includes("function scheduleBindingHistoryReconciliation(binding, { reason = 'background', force = false } = {}) {"), 'server should expose a background reconciliation scheduler');
   assert(serverJs.includes('function findLatestPersistableAssistantMessageAfterUser(messages, userIndex, minTimestampMs) {'), 'server should look for the latest persistable assistant instead of blindly taking the latest raw assistant event');
+  assert(serverJs.includes('function gatewayUserTextMatchesExpected(actualUserText, expectedUserText) {'), 'server should centralize bounded user-turn text matching for polluted upstream rows');
+  assert(serverJs.includes('return /^system:/i.test(prefix) || /\\bexec completed\\b/i.test(prefix);'), 'server should only tolerate recognized upstream system-prefix noise');
+  assert(serverJs.includes('if (gatewayUserTextMatchesExpected(actual, expectedUserText)) return index;'), 'sync reply waiting should reuse the tolerant user-turn matcher');
+  assert(serverJs.includes('function userHistoryBlocksMatch(upstreamBlocks, localBlocks) {'), 'open-time reconciliation should reuse the same tolerant user-block matcher');
+  assert(serverJs.includes('return userHistoryBlocksMatch(candidateBlocks, Array.isArray(row.blocks) ? row.blocks : []);'), 'user history reconciliation should use tolerant block comparison for polluted upstream rows');
   assert(serverJs.includes('if (gatewayMessageHasToolCalls(message)) return null;'), 'server should keep tool-phase assistant messages from being persisted as final replies');
   assert(serverJs.includes('const candidates = extractReconcileAssistantRows(latestBinding, messages, localRows, sessionStartMs);'), 'open-time reconciliation should only extract assistant backfill candidates');
   assert(serverJs.includes('if (pendingAssistantRow && activeUserMatchedLocalHistory) rows.push(pendingAssistantRow);'), 'assistant backfill should only occur for turns whose user message already exists locally');

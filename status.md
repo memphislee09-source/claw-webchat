@@ -51,6 +51,7 @@
   - 输入区右侧保留静态 `T` thinking 控件；当前 session 的模型与完整 thinking level 会显示在聊天头部 agent 名称右侧，点击 `T` 后仍可弹出当前模型可用的 thinking 选项并直接切换
   - 前端已接入 `/api/openclaw-webchat/events` SSE 事件流：agent 列表与当前会话现在优先根据服务端真实变化触发刷新，固定轮询已降为低频兜底而非主同步机制
   - 联系人切换 / 会话打开路径已进一步收口：`agents/{agentId}/open` 现在优先直接返回本地首屏历史，不再同步等待慢速 upstream `chat.history` 对账；缺失消息修复仍保留，但改为后台 reconcile + 现有 SSE 刷新链路补回
+  - upstream `role:user` 若在原始用户文本前拼入 `System:` / `Exec completed` 这类系统前缀，当前 turn 匹配与 open-time reconcile 仍能识别为同一轮，避免 agent 实际已回但 WebChat 长时间停在“处理中”
   - 已新增 Android voice/chat 复用接口：`GET /api/openclaw-webchat/sessions/:sessionKey/events` 会按 session 推送 `ready` / `run.accepted` / `run.state` / `assistant.delta` / `assistant.final` / `assistant.error`，`POST /sessions/:sessionKey/turns` 支持异步 text/voice turn，`POST /sessions/:sessionKey/runs/:runId/abort` 支持 barge-in / 手动停止
   - 用户附件上传链路已统一为通用 attachment 模型：图片、音频、视频和普通文件都可经同一 `+` 入口上传；本地仍稳定保存 `openclaw-upload:*`，但发送给 upstream agent 前会统一物化成可读取源，不再把 opaque upload id 直接暴露给 agent
   - 对话栏滚动控制已进一步统一：render、媒体延迟加载、历史补页、当前会话刷新与显式跳转现在共用一套 viewport snapshot / restore 逻辑，默认优先保持当前位置，只有显式 follow-bottom 时才自动贴底
@@ -120,6 +121,7 @@
 - `main` 已补一个 `0.1.6` 后续小修：`/model` 弹窗空闲态不再在顶部说明之外重复显示第二份相同介绍文案
 - `main` 已补一个 `0.1.6` 后续小修：agent 切换时不再等待 thinking 状态请求才打开会话；输入区右侧 thinking 控件回到静态 `T` 图标，当前模型与完整 thinking level 改为显示在聊天头部标题旁
 - `main` 已补一个 `0.1.8` 后续小修：联系人切换不再同步等待 open-time upstream history reconcile；会话现在先秒开本地历史，再在后台做缺消息对账并复用 SSE 刷新
+- `main` 已补一个 `0.1.8` 后续小修：当 upstream 把 `System:` / `Exec completed` 前缀拼进 `role:user` 文本时，同步等待、late-reply 补偿与 open-time reconcile 现在会按受限规则识别同一轮，不再漏掉最终 assistant 回复
 - `main` 已补一个 `0.1.6` 后续小修：对话栏现在区分“贴底跟随”和“中段阅读”，后台轮询发现当前会话更新时会先显示提示而不是直接打断阅读；同时消息列表已支持 `Home` / `End` / `PageUp` / `PageDown`
 - `0.1.6` 已收口准备同步：`/model` 完整列表与响应速度修复、模型弹窗滚动/停留交互收口，以及 `T:*` thinking 菜单的同级提速与停留确认交互都已纳入当前版本
 - `0.1.5` 已同步到 GitHub：历史搜索第二阶段首批增强、agent 级 `/model` 切换、发送/停止双态按钮、`chat.abort` 停止链路、公开发布文档与图片查看器缩放读数修复均已纳入当前版本
@@ -150,6 +152,7 @@
 - 2026-03-25 已把对话栏统一 viewport 控制器并入 `main`：引入 viewport revision + snapshot/restore 控制器，过期异步回调不会再拿旧锚点回拉视口，当前实现默认优先保持当前位置
 - 2026-03-26 已把缺消息收口并入 `main`：assistant 最终回复判定不再把带 `toolCall` 的进度消息误收为最终答案；会话打开时会对当前 upstream session 做 history reconcile，把已存在 upstream、但本地 JSONL 漏掉的 user / assistant 行回补回来
 - 2026-03-27 已把联系人切换主链路提速并入当前工作树：`POST /api/openclaw-webchat/agents/:agentId/open` 不再同步等待 upstream `chat.history`；缺消息对账仍保留，但已经改为后台调度，并带每个 agent 的 in-flight 去重与短 cooldown，避免快速切换联系人时重复打慢 RPC
+- 2026-03-27 已修复一类 `yuyan-mini` 实例暴露出的 turn 匹配缺口：若 upstream 把 `System:` / `Exec completed` 进程提示拼进同一条 `role:user` 文本前面，WebChat 现在仍能把这条 upstream user 识别回本地当前轮次，并在同步等待、late-reply 补偿与 reopen 对账时正确补回最终 assistant
 - 2026-03-26 已补 Android voice/chat 复用接口：不新增 voice-only session，也不做 WebRTC；voice turn 通过新的 async `/turns` + session SSE + `/runs/{runId}/abort` 接到现有 `openclaw-webchat` 真源，并以普通 user history message 形式同时保留 transcript text block 与 raw audio block
 - 2026-03-27 `main` 当前代码基线已提升到 `0.1.8`；公开 GitHub Release bundle 仍停留在 `0.1.6`
 - 2026-03-24 已补设置面板“关于”版本号显示，并把 thinking 按钮字重收轻，保证它作为工具控件不抢主发送动作

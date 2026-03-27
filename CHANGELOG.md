@@ -11,6 +11,7 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ### Fixed
 - Add per-agent in-flight dedupe and a short cooldown to background open-time reconciliation so rapid contact switching does not repeatedly trigger the same upstream history fetch
+- Keep reply matching and open-time reconciliation resilient when upstream prepends recognized `System:` / `Exec completed` text to a `role:user` message, so completed agent replies are still persisted instead of leaving WebChat stuck in a long-running state
 
 ## [0.1.8] - 2026-03-27
 
