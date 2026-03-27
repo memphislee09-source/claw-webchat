@@ -6,6 +6,12 @@ The format is intentionally lightweight and follows a simple versioned release l
 
 ## [Unreleased]
 
+### Changed
+- Return the local first-page history immediately when opening an existing conversation, then run upstream history reconciliation in the background so contact switching no longer waits on a slow `chat.history` round-trip
+
+### Fixed
+- Add per-agent in-flight dedupe and a short cooldown to background open-time reconciliation so rapid contact switching does not repeatedly trigger the same upstream history fetch
+
 ## [0.1.8] - 2026-03-27
 
 ### Added

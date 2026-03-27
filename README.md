@@ -81,6 +81,7 @@ curl http://127.0.0.1:3770/healthz
 - 本地 JSONL 历史与可见消息时间线
 - 富媒体解析，兼容结构化 block 与 `MEDIA:` / `mediaUrl:` fallback
 - 统一附件投递链路：本地稳定保存 `openclaw-upload:*`，发送给 agent 前再物化成可读取源
+- 联系人切换 / 会话打开优先秒开本地历史；缺失消息回补改为后台 reconcile + SSE 刷新，不再阻塞进入对话
 - 当前 agent 历史搜索，支持跳转和高亮
 - `/model` / `/models` 模型选择器，完整 provider 分组、暖启动更快
 - `T:*` Think 快捷切换，按模型感知可用等级
@@ -105,6 +106,7 @@ curl http://127.0.0.1:3770/healthz
 | `OPENCLAW_BIN` | `openclaw` | OpenClaw CLI 路径 |
 | `OPENCLAW_WEBCHAT_DATA_DIR` | `./data` | 运行时数据目录 |
 | `OPENCLAW_WEBCHAT_MEDIA_SECRET` | 自动生成 | 媒体 token 签名密钥 |
+| `OPENCLAW_WEBCHAT_HISTORY_RECONCILE_COOLDOWN_MS` | `15000` | 联系人切换后后台 upstream history reconcile 的最短重试间隔 |
 | `OPENCLAW_WEBCHAT_LAUNCHD_LABEL` | `ai.openclaw.webchat` | macOS `launchd` label |
 | `OPENCLAW_WEBCHAT_GITHUB_URL` | 项目仓库地址 | 设置页 About 面板显示的 GitHub 链接 |
 
@@ -245,6 +247,7 @@ curl http://127.0.0.1:3770/healthz
 - Local JSONL history and visible-message timeline
 - Rich media parsing with structured blocks plus `MEDIA:` / `mediaUrl:` fallbacks
 - Unified attachment delivery: keep stable local `openclaw-upload:*` sources, then materialize them into agent-readable sources before upstream send
+- Contact switching now returns local history immediately; missing upstream-visible replies are still backfilled in the background instead of blocking the open request
 - Timeline search with jump-to-hit and highlight
 - `/model` / `/models` picker with complete provider-grouped lists and faster warm reopen
 - `T:*` Think quick switch with model-aware options
@@ -269,6 +272,7 @@ Useful environment variables:
 | `OPENCLAW_BIN` | `openclaw` | Path to the OpenClaw CLI |
 | `OPENCLAW_WEBCHAT_DATA_DIR` | `./data` | Runtime data directory |
 | `OPENCLAW_WEBCHAT_MEDIA_SECRET` | auto-generated | Media token signing secret |
+| `OPENCLAW_WEBCHAT_HISTORY_RECONCILE_COOLDOWN_MS` | `15000` | Minimum interval between background upstream-history reconciliation passes after conversation opens |
 | `OPENCLAW_WEBCHAT_LAUNCHD_LABEL` | `ai.openclaw.webchat` | macOS `launchd` label |
 | `OPENCLAW_WEBCHAT_GITHUB_URL` | project repo URL | GitHub link shown in the settings About panel |
 

@@ -198,11 +198,14 @@ async function checkBootstrapContract() {
   assert(serverJs.includes("broadcastEventStream('agent-update'"), 'server should broadcast agent updates onto the SSE stream');
   assert(serverJs.includes("broadcastEventStream('conversation-update'"), 'server should broadcast conversation updates onto the SSE stream');
   assert(serverJs.includes('const HISTORY_RECONCILE_FETCH_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_LIMIT || 200);'), 'server should define an open-time upstream history reconciliation fetch limit');
+  assert(serverJs.includes('const HISTORY_RECONCILE_COOLDOWN_MS = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_COOLDOWN_MS || 15000);'), 'server should define a short cooldown for background history reconciliation');
   assert(serverJs.includes('const HISTORY_RECONCILE_USER_MATCH_WINDOW_MS = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_USER_MATCH_WINDOW_MS || 2 * 60 * 1000);'), 'server should bound upstream/local user-turn matching with a narrow reconciliation window');
   assert(serverJs.includes('const MODEL_CATALOG_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_MODEL_CATALOG_CACHE_TTL_MS || 30000);'), 'server should cache gateway model catalogs briefly');
   assert(serverJs.includes('const SESSION_STATE_CACHE_TTL_MS = Number(process.env.OPENCLAW_WEBCHAT_SESSION_STATE_CACHE_TTL_MS || 2500);'), 'server should cache gateway session state briefly');
   assert(serverJs.includes('function summarizeModelCatalog(models) {'), 'server should summarize the model catalog by provider for slash output');
-  assert(serverJs.includes('await reconcileBindingHistory(hydrated, { limit: HISTORY_RECONCILE_FETCH_LIMIT });'), 'server should reconcile upstream session history when opening an agent');
+  assert(serverJs.includes('const bindingHistoryReconciliations = new Map();'), 'server should track background history reconciliation state per agent');
+  assert(serverJs.includes("void scheduleBindingHistoryReconciliation(hydrated, { reason: 'open' });"), 'server should schedule open-time history reconciliation in the background');
+  assert(serverJs.includes("function scheduleBindingHistoryReconciliation(binding, { reason = 'background', force = false } = {}) {"), 'server should expose a background reconciliation scheduler');
   assert(serverJs.includes('function findLatestPersistableAssistantMessageAfterUser(messages, userIndex, minTimestampMs) {'), 'server should look for the latest persistable assistant instead of blindly taking the latest raw assistant event');
   assert(serverJs.includes('if (gatewayMessageHasToolCalls(message)) return null;'), 'server should keep tool-phase assistant messages from being persisted as final replies');
   assert(serverJs.includes('const candidates = extractReconcileAssistantRows(latestBinding, messages, localRows, sessionStartMs);'), 'open-time reconciliation should only extract assistant backfill candidates');

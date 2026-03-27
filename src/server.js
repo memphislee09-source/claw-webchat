@@ -29,6 +29,7 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const HISTORY_PAGE_LIMIT_MAX = 200;
 const HISTORY_OPEN_PAGE_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_OPEN_PAGE_LIMIT || 15);
 const HISTORY_RECONCILE_FETCH_LIMIT = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_LIMIT || 200);
+const HISTORY_RECONCILE_COOLDOWN_MS = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_COOLDOWN_MS || 15000);
 const HISTORY_RECONCILE_USER_MATCH_WINDOW_MS = Number(process.env.OPENCLAW_WEBCHAT_HISTORY_RECONCILE_USER_MATCH_WINDOW_MS || 2 * 60 * 1000);
 const NAMESPACE = 'openclaw-webchat';
 const LEGACY_SESSION_NAMESPACE = 'claw-webchat';
@@ -72,6 +73,7 @@ const sessionEventClients = new Map();
 const sessionEventBacklogs = new Map();
 const sessionEventSequences = new Map();
 const sessionRunStates = new Map();
+const bindingHistoryReconciliations = new Map();
 
 const BOOTSTRAP_TEXT = [
   '[openclaw-webchat hidden bootstrap]',
@@ -285,12 +287,6 @@ app.post('/api/openclaw-webchat/agents/:agentId/open', async (req, res) => {
     const created = !existing;
 
     const hydrated = await ensureBootstrapInjected(binding);
-    try {
-      await reconcileBindingHistory(hydrated, { limit: HISTORY_RECONCILE_FETCH_LIMIT });
-    } catch (error) {
-      console.error('[openclaw-webchat] open-time history reconciliation failed:', formatError(error));
-    }
-
     const { messages, nextBefore, hasMore } = getHistoryPage({ agentId, limit: HISTORY_OPEN_PAGE_LIMIT, before: null });
     res.json({
       agentId,
@@ -298,6 +294,10 @@ app.post('/api/openclaw-webchat/agents/:agentId/open', async (req, res) => {
       created,
       bootstrapVersion: hydrated.bootstrapVersion || null,
       history: { messages, nextBefore, hasMore }
+    });
+
+    setImmediate(() => {
+      void scheduleBindingHistoryReconciliation(hydrated, { reason: 'open' });
     });
   } catch (error) {
     res.status(500).json({ error: formatError(error) });
@@ -2581,6 +2581,54 @@ async function reconcileBindingHistory(binding, { limit = HISTORY_RECONCILE_FETC
     appendedCount: appendedRows.length,
     appendedRows
   };
+}
+
+function scheduleBindingHistoryReconciliation(binding, { reason = 'background', force = false } = {}) {
+  if (!binding?.agentId) return null;
+
+  const agentId = binding.agentId;
+  const now = Date.now();
+  const existing = bindingHistoryReconciliations.get(agentId) || null;
+  if (existing?.promise) return existing.promise;
+
+  const sameUpstreamSession = existing?.upstreamSessionKey === binding.upstreamSessionKey;
+  if (!force && sameUpstreamSession && Number(existing?.lastScheduledAt || 0) > 0) {
+    const elapsedMs = now - Number(existing.lastScheduledAt || 0);
+    if (elapsedMs < HISTORY_RECONCILE_COOLDOWN_MS) {
+      return null;
+    }
+  }
+
+  const state = {
+    upstreamSessionKey: binding.upstreamSessionKey,
+    lastScheduledAt: now,
+    lastFinishedAt: Number(existing?.lastFinishedAt || 0),
+    lastAppendedCount: Number(existing?.lastAppendedCount || 0),
+    lastError: existing?.lastError || '',
+    promise: null
+  };
+
+  const promise = (async () => {
+    try {
+      const result = await reconcileBindingHistory(binding, { limit: HISTORY_RECONCILE_FETCH_LIMIT });
+      state.lastFinishedAt = Date.now();
+      state.lastAppendedCount = Number(result?.appendedCount || 0);
+      state.lastError = '';
+      return result;
+    } catch (error) {
+      state.lastFinishedAt = Date.now();
+      state.lastError = formatError(error);
+      console.error(`[openclaw-webchat] ${reason} history reconciliation failed:`, state.lastError);
+      return { appendedCount: 0, appendedRows: [] };
+    } finally {
+      state.promise = null;
+      bindingHistoryReconciliations.set(agentId, state);
+    }
+  })();
+
+  state.promise = promise;
+  bindingHistoryReconciliations.set(agentId, state);
+  return promise;
 }
 
 function extractReconcileAssistantRows(binding, messages, localRows, sessionStartMs = 0) {

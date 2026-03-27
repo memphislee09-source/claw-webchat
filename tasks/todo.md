@@ -1,6 +1,11 @@
 # Task Todo
 
 ## Current Task
+- [x] Refactor `POST /api/openclaw-webchat/agents/:agentId/open` so it returns local history immediately instead of synchronously waiting on upstream history reconciliation
+- [x] Keep open-time upstream reconciliation as a background repair path with per-agent dedupe / short TTL so rapid contact switching does not spam slow `chat.history` calls
+- [x] Make background reconciliation-triggered `conversation-update` events refresh the active conversation safely without regressing reading-position behavior
+- [x] Update selftest coverage and source assertions for the non-blocking open flow
+- [x] Re-run project verification and record the result in the review section
 - [x] Create a dedicated feature branch from `main@432ee3a` for the unified attachment-delivery fix
 - [x] Implement a server-side attachment materialization helper so upstream messages receive agent-readable sources instead of raw `openclaw-upload:*` ids
 - [x] Extend `/api/openclaw-webchat/uploads` beyond image/audio to support generic file attachments while preserving current image/audio metadata behavior
@@ -71,6 +76,16 @@
 - [x] Verify merged `main`, update baseline notes, and push the new mainline commit to GitHub
 
 ## Current Review
+- Contact-switch latency follow-up now removes the slow upstream `chat.history` reconcile from the synchronous `POST /api/openclaw-webchat/agents/:agentId/open` path.
+- `open` still returns the same local first-page history payload, but it now schedules `scheduleBindingHistoryReconciliation(...)` on the background side after responding, so users can enter a conversation without waiting on the slow gateway round-trip.
+- Background open-time reconciliation now has per-agent in-flight dedupe plus a short cooldown (`OPENCLAW_WEBCHAT_HISTORY_RECONCILE_COOLDOWN_MS`, default `15000`) to avoid repeated `chat.history` calls when users switch between contacts quickly.
+- No frontend code changes were required for safe refresh behavior: background reconciliation still appends to local history via the existing broadcast path, and the current SSE + `refreshAgents(...)` logic already decides between auto-refresh-at-bottom vs. pending-refresh notice while reading history.
+- Selftest source assertions now lock in the new non-blocking contract by checking for the background scheduler/cooldown instead of the old synchronous `await reconcileBindingHistory(...)` open path.
+- After restarting the LaunchAgent onto this build, direct timing against `POST /api/openclaw-webchat/agents/mira/open` measured about `0.012s`, `0.008s`, and `0.019s`, which is consistent with the blocking `chat.history` round-trip having been removed from the request path.
+- Verification for this follow-up passed with:
+  - `npm run check`
+  - `launchctl kickstart -k gui/$(id -u)/ai.openclaw.webchat`
+  - `npm run selftest`
 - The branch has now been version-bumped to `0.1.8`, including `package.json`, the top-level `package-lock.json` metadata, server/app version fallbacks, and the public docs that surface the current branch version.
 - `README.md`, `status.md`, `docs/HANDOFF-2026-03-24.md`, and `CHANGELOG.md` now record the unified attachment-delivery work as mainline behavior: generic attachment uploads, server-side upstream source materialization, and the continued distinction between stable local `openclaw-upload:*` storage and agent-readable delivery sources.
 - Release verification for the `0.1.8` branch state passed with:
